@@ -22,7 +22,12 @@ os.makedirs("data/charts", exist_ok=True)
 async def main() -> None:
     parser = argparse.ArgumentParser(description="MAI-IDX-Signal one-shot scanner")
     parser.add_argument("--mode", default="manual", help="Scan mode")
-    parser.add_argument("--limit", type=int, default=20, help="Max symbols to scan")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Max symbols to scan (0 = full IDX universe, ~655 symbols)",
+    )
     parser.add_argument("--top", type=int, default=5, help="Top N signals to output")
     parser.add_argument("--no-chart", action="store_true", help="Skip chart generation")
     parser.add_argument("--print-telegram", action="store_true", help="Print Telegram formatted text")

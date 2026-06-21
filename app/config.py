@@ -43,6 +43,7 @@ class Settings(BaseSettings):
 
     # Ops
     LOG_LEVEL: str = "INFO"
+    ENABLE_SCHEDULER: bool = True
 
     def effective_telegram_chat_id(self) -> str:
         """Return TELEGRAM_CHAT_ID falling back to TELEGRAM_GROUP_ID."""

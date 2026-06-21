@@ -27,6 +27,17 @@ async def get_latest_signals(limit: int = Query(20, ge=1, le=100)):
     return {"count": len(signals), "signals": signals}
 
 
+@signals_router.post("/send-latest")
+async def send_latest_signals(limit: int = Query(5, ge=1, le=20), mode: str = "manual"):
+    """Read the latest persisted signals and push them to Telegram."""
+    signals = await list_latest_signals(limit=limit)
+    if not signals:
+        return {"sent": 0, "detail": "no signals to send"}
+    from app.bots.telegram import send_signal_batch
+    sent = await send_signal_batch(signals, mode=mode)
+    return {"sent": sent, "count": len(signals)}
+
+
 @signals_router.get("/{signal_id}")
 async def get_signal_by_id(signal_id: int):
     """Return a single persisted signal by id."""

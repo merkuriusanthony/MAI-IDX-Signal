@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from app.config import settings
 
@@ -176,6 +177,105 @@ def run() -> None:
     app = build_application()
     logger.info("Starting Telegram bot polling...")
     app.run_polling()
+
+
+# ---------------------------------------------------------------------------
+# Async lifecycle (for embedding in FastAPI lifespan)
+# ---------------------------------------------------------------------------
+
+_PLACEHOLDERS = {"", "changeme", "xxx", "your-token", "your_token_here", "placeholder"}
+
+
+def token_is_valid(token: str | None) -> bool:
+    """True if the token looks real (non-empty, not a placeholder)."""
+    t = (token or "").strip()
+    return bool(t) and t.lower() not in _PLACEHOLDERS
+
+
+async def start_bot() -> object | None:
+    """Initialize and start the PTB application + updater (non-blocking).
+
+    Returns the running Application, or None if disabled / failed.
+    Unlike run_polling(), this does not block — it starts the updater as a
+    background task so it can live inside the FastAPI lifespan.
+    """
+    if not token_is_valid(settings.TELEGRAM_BOT_TOKEN):
+        logger.info("Telegram bot disabled (no token)")
+        return None
+    try:
+        app = build_application()
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        logger.info("Telegram bot started")
+        return app
+    except Exception as exc:
+        logger.warning("Telegram bot failed to start: %s", exc)
+        return None
+
+
+async def stop_bot(app: object | None) -> None:
+    """Gracefully stop a running PTB application."""
+    if app is None:
+        return
+    try:
+        if getattr(app, "updater", None) and app.updater.running:
+            await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+        logger.info("Telegram bot stopped")
+    except Exception as exc:
+        logger.warning("Telegram bot stop error: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Outbound batch delivery (for scheduler jobs)
+# ---------------------------------------------------------------------------
+
+async def send_signal_batch(signals: list, chat_id: str | None = None, mode: str = "manual") -> int:
+    """Send a scan summary + per-signal charts to a Telegram chat.
+
+    Returns the number of messages sent. No-op (returns 0) if the bot token
+    or chat id is missing.
+    """
+    if not token_is_valid(settings.TELEGRAM_BOT_TOKEN):
+        logger.info("send_signal_batch skipped: no telegram token")
+        return 0
+    if not signals:
+        return 0
+    chat_id = chat_id or settings.effective_telegram_chat_id()
+    if not chat_id:
+        logger.warning("send_signal_batch skipped: no chat id")
+        return 0
+
+    from telegram import Bot
+    from app.signals.renderer import format_scan_summary, format_telegram_message
+
+    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+    sent = 0
+    try:
+        summary = format_scan_summary(signals, mode=mode)
+        await bot.send_message(chat_id=chat_id, text=summary, parse_mode="Markdown")
+        sent += 1
+    except Exception as exc:
+        logger.warning("send_signal_batch summary error: %s", exc)
+
+    for sig in signals:
+        caption = format_telegram_message(sig)[:1024]
+        chart_path = sig.get("chart_path", "")
+        try:
+            if chart_path and os.path.exists(chart_path):
+                with open(chart_path, "rb") as photo:
+                    await bot.send_photo(
+                        chat_id=chat_id, photo=photo, caption=caption, parse_mode="Markdown"
+                    )
+            else:
+                await bot.send_message(chat_id=chat_id, text=caption, parse_mode="Markdown")
+            sent += 1
+        except Exception as exc:
+            logger.warning("send_signal_batch send error for %s: %s", sig.get("symbol"), exc)
+    logger.info("send_signal_batch sent %d messages to %s", sent, chat_id)
+    return sent
 
 
 # ---------------------------------------------------------------------------
