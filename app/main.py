@@ -38,18 +38,22 @@ async def lifespan(app: FastAPI):
     await init_db()
 
     # 3. Telegram bot (non-blocking PTB v20)
-    try:
-        from app.bots.telegram import start_bot, token_is_valid
-        if token_is_valid(settings.TELEGRAM_BOT_TOKEN):
-            _bot_app = await start_bot()
-            if _bot_app:
-                logger.info("Telegram bot started")
+    # Use ENABLE_BOT_POLLING=false when another process owns the same token
+    if settings.ENABLE_BOT_POLLING:
+        try:
+            from app.bots.telegram import start_bot, token_is_valid
+            if token_is_valid(settings.TELEGRAM_BOT_TOKEN):
+                _bot_app = await start_bot()
+                if _bot_app:
+                    logger.info("Telegram bot started (polling)")
+                else:
+                    logger.warning("Telegram bot failed to start (start_bot returned None)")
             else:
-                logger.warning("Telegram bot failed to start (start_bot returned None)")
-        else:
-            logger.info("Telegram bot disabled (no token)")
-    except Exception as exc:
-        logger.warning("Telegram bot startup error (non-fatal): %s", exc)
+                logger.info("Telegram bot disabled (no token)")
+        except Exception as exc:
+            logger.warning("Telegram bot startup error (non-fatal): %s", exc)
+    else:
+        logger.info("Telegram bot polling disabled (ENABLE_BOT_POLLING=false) — outbound send still active")
 
     # 4. APScheduler
     if settings.ENABLE_SCHEDULER:
