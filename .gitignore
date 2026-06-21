@@ -8,3 +8,7 @@ data/
 *.sqlite
 *.sqlite3
 .DS_Store
+
+.hermes/
+.claude_goal.txt
+.claude_finish.txt
