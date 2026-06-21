@@ -13,5 +13,6 @@ pydantic-settings
 python-dotenv
 requests
 pytest
+python-multipart
 yfinance
 mplfinance
