@@ -55,7 +55,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: 100.98.225.116
-          username: ${{ secrets.SSH_USER }}
+          username: ${{ secrets.SYNOLOGY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             sudo /usr/local/bin/docker compose -f /volume1/docker/mai-idx-signal/docker-compose.yml pull
