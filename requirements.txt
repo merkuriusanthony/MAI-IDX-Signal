@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+aiosqlite
+pandas
+numpy
+matplotlib
+pandas-ta
+httpx
+python-telegram-bot>=20
+apscheduler
+pydantic-settings
+python-dotenv
+requests
+pytest
+yfinance
+mplfinance
