@@ -26,6 +26,6 @@ def test_bar_caps_at_100():
 
 def test_get_sector():
     from app.data.sectors import get_sector
-    assert get_sector("BBCA") == "Perbankan"
-    assert get_sector("bbri") == "Perbankan"
-    assert get_sector("UNKNOWN") == "Lainnya"
+    assert get_sector("BBCA") == "Financial Services"
+    assert get_sector("bbri") == "Financial Services"
+    assert get_sector("UNKNOWN") == "Unknown"
