@@ -78,5 +78,10 @@ def build_scheduler():
         CronTrigger(day_of_week="mon-fri", hour=16, minute=5, timezone=WIB),
         id="eod_scan",
     )
+    scheduler.add_job(
+        _tracker_job,
+        CronTrigger(day_of_week="mon-fri", hour="9-16", minute=0, timezone=WIB),
+        id="tracker_hourly",
+    )
 
     return scheduler

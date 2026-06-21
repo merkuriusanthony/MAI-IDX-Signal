@@ -151,6 +151,8 @@ async def _update_signal_full(
         new_status = "tp1"
     elif stop_loss and last_price <= stop_loss:
         new_status = "stopped"
+    elif holding_days > 20:
+        new_status = "expired"
 
     async with async_session() as db:
         # update Signal
@@ -168,7 +170,8 @@ async def _update_signal_full(
             track.current_price = last_price
             if entry:
                 track.pnl_pct = return_pct
-            status_map = {"tp2": "TP2_HIT", "tp1": "TP1_HIT", "stopped": "SL_HIT", "open": "OPEN"}
+            status_map = {"tp2": "TP2_HIT", "tp1": "TP1_HIT", "stopped": "SL_HIT",
+                          "expired": "EXPIRED", "open": "OPEN"}
             track.status = status_map.get(new_status, "OPEN")
 
         # write update row

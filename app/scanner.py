@@ -6,7 +6,7 @@ import logging
 from typing import Dict, List, Optional
 
 from app.analytics.indicators import compute_features
-from app.analytics.scoring import score_snapshot
+from app.analytics.scoring import gorengan_penalty, score_snapshot
 from app.config import settings
 from app.data.fetch_yahoo import df_to_ohlcv_rows, fetch_ohlcv_safe
 from app.data.universe import load_universe
@@ -97,9 +97,25 @@ class ScannerService:
                         return None
 
                     score_dict = score_snapshot(snap)
+
+                    # anti-gorengan penalty
+                    daily_change = 0.0
+                    if len(df) >= 2 and df["close"].iloc[-2]:
+                        daily_change = (
+                            df["close"].iloc[-1] - df["close"].iloc[-2]
+                        ) / df["close"].iloc[-2]
+                    penalty = gorengan_penalty({
+                        "close": snap.close,
+                        "avg_value_20d": value_est,
+                        "volume_ratio": snap.volume_ratio,
+                        "atr_pct": (snap.atr_pct or 0) / 100.0,
+                        "daily_change_pct": daily_change,
+                    })
+                    final_score = max(0.0, score_dict["score"] - penalty)
+
                     candidate = {
                         "symbol": symbol,
-                        "score": score_dict["score"],
+                        "score": final_score,
                         "action": score_dict["action"],
                         "close": snap.close,
                         "volume": int(snap.volume_latest),

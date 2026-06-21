@@ -117,8 +117,15 @@ async def why_command(update, context):
         reasons = sig.get("reasons", [])
         summary = sig.get("summary", "")
 
-    reason_text = "\n".join(f"• {r}" for r in reasons[:6])
-    text = f"*{ticker}*\n\n"
+    action = sig.get("action", "HOLD")
+    score = sig.get("score", 0) or 0
+    entry = sig.get("entry", 0) or 0
+    tp1 = sig.get("tp1", 0) or 0
+    sl = sig.get("stop_loss") or sig.get("sl", 0) or 0
+
+    reason_text = "\n".join(f"• {r}" for r in reasons[:8])
+    text = f"*{ticker}* — {action} (score {score:.0f}/100)\n\n"
+    text += f"Entry: {entry:,.0f} | TP1: {tp1:,.0f} | SL: {sl:,.0f}\n\n"
     if summary:
         text += f"_{summary}_\n\n"
     text += f"*Analisa teknikal:*\n{reason_text}"
@@ -128,23 +135,29 @@ async def why_command(update, context):
 
 
 async def track_command(update, context):
-    """/track — show open signals status."""
+    """/track — show open signals with live PnL."""
     from app.db import list_latest_signals
-    signals = await list_latest_signals(limit=20)
-    open_signals = [s for s in signals if s.get("status") == "open"]
+    signals = await list_latest_signals(limit=50)
+    open_signals = [s for s in signals if s.get("status") == "open"][:10]
 
     if not open_signals:
         await update.message.reply_text("Tidak ada sinyal aktif saat ini.")
         return
 
-    from app.signals.renderer import LABEL_EMOJI
-    lines = ["*📋 Sinyal Aktif*\n"]
-    for s in open_signals[:10]:
-        action = s.get("action", "HOLD")
-        emoji = LABEL_EMOJI.get(action, "⚪")
+    from app.data.fetch_yahoo import fetch_ohlcv
+    lines = ["*📋 Sinyal Aktif + PnL*\n"]
+    for s in open_signals:
+        entry = s.get("entry", 0) or 0
+        try:
+            df = fetch_ohlcv(s["symbol"], period="5d")
+            price = float(df["close"].iloc[-1]) if not df.empty else entry
+        except Exception:
+            price = entry
+        pnl = (price - entry) / entry * 100 if entry else 0.0
+        emoji = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
         lines.append(
-            f"{emoji} *{s['symbol']}*  {action}  "
-            f"entry={s.get('entry','-')}  sl={s.get('sl','-')}"
+            f"{emoji} *{s['symbol']}* {s.get('action','HOLD')} | "
+            f"entry {entry:,.0f} | now {price:,.0f} | {pnl:+.1f}%"
         )
 
     lines.append("\n_Lihat dashboard untuk detail._")

@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from app.analytics.indicators import FeatureSnapshot, compute_features
-from app.analytics.scoring import VALID_LABELS, score, score_snapshot
+from app.analytics.scoring import VALID_LABELS, gorengan_penalty, score, score_snapshot
 
 
 @pytest.fixture
@@ -115,3 +115,30 @@ def test_score_snapshot_no_data():
 def test_label_matches_action(df):
     out = score(df, _indicators(130.0))
     assert out["label"] == out["action"]
+
+
+# ---------------------------------------------------------------------------
+# Anti-gorengan penalty
+# ---------------------------------------------------------------------------
+
+def test_gorengan_penny_stock():
+    snap = {"close": 30, "avg_value_20d": 100_000_000, "volume_ratio": 1}
+    assert gorengan_penalty(snap) >= 20
+
+
+def test_gorengan_extreme_spike():
+    snap = {"close": 500, "avg_value_20d": 5_000_000_000,
+            "volume_ratio": 15, "daily_change_pct": 0.30}
+    assert gorengan_penalty(snap) >= 30
+
+
+def test_gorengan_clean_stock():
+    snap = {"close": 5000, "avg_value_20d": 5_000_000_000,
+            "volume_ratio": 1.5, "atr_pct": 0.03, "daily_change_pct": 0.01}
+    assert gorengan_penalty(snap) == 0
+
+
+def test_gorengan_capped_at_50():
+    snap = {"close": 20, "avg_value_20d": 1_000, "volume_ratio": 20,
+            "atr_pct": 0.30, "daily_change_pct": 0.40}
+    assert gorengan_penalty(snap) == 50

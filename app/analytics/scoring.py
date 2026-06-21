@@ -29,6 +29,33 @@ def _action_for(score: float) -> str:
     return "DANGER"
 
 
+def gorengan_penalty(snap: dict) -> float:
+    """Return 0-50 penalty points for gorengan (manipulation) characteristics.
+
+    Expects a dict with keys: close, avg_value_20d, volume_ratio, atr_pct
+    (fractional, e.g. 0.15 = 15%), daily_change_pct (fractional).
+    """
+    penalty = 0.0
+    price = snap.get("close", 0)
+    avg_value = snap.get("avg_value_20d", 0)
+    vol_ratio = snap.get("volume_ratio", 1.0)
+    atr_pct = snap.get("atr_pct", 0)
+    daily_change = snap.get("daily_change_pct", 0)
+
+    if price < 50:  # penny stock
+        penalty += 20
+    if avg_value < 500_000_000:  # very low liquidity (< 500jt)
+        penalty += 15
+    if vol_ratio > 10:  # extreme volume spike
+        penalty += 15
+    if atr_pct > 0.15:  # extreme volatility (ATR > 15%)
+        penalty += 10
+    if daily_change > 0.25:  # extreme single-day move (>25% up)
+        penalty += 20
+
+    return min(penalty, 50)
+
+
 def score_snapshot(snap: FeatureSnapshot) -> Dict:
     """Score a FeatureSnapshot.
 

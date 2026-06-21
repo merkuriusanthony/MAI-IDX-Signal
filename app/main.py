@@ -15,7 +15,7 @@ from app.dashboard.routes import router as dashboard_router
 from app.db import init_db
 from app.signals.routes import chart_router, scan_router, signals_router
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
