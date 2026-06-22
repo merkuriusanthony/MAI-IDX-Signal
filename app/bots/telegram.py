@@ -134,6 +134,56 @@ async def why_command(update, context):
     await msg.edit_text(text, parse_mode="Markdown")
 
 
+async def subscribe_command(update, context):
+    """/subscribe — show the caller's subscription tier and usage."""
+    tg_user = update.effective_user
+    telegram_id = tg_user.id
+
+    from app.db import init_db
+    from app.subscription.access import FREE_DAILY_LIMIT, get_or_create_user
+
+    await init_db()
+    user = await get_or_create_user(telegram_id, tg_user)
+    limit = FREE_DAILY_LIMIT if user.tier == "free" else "∞"
+    msg = (
+        f"👤 *{user.full_name or user.username or telegram_id}*\n"
+        f"Tier: *{user.tier.upper()}*\n"
+        f"Sinyal hari ini: {user.signal_count}/{limit}\n"
+    )
+    if user.tier == "free":
+        msg += "\nUpgrade ke Pro: hubungi admin."
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def grant_command(update, context):
+    """/grant TELEGRAM_ID [tier] — admin-only tier grant."""
+    caller_id = update.effective_user.id
+    if not settings.ADMIN_TELEGRAM_ID or caller_id != settings.ADMIN_TELEGRAM_ID:
+        await update.message.reply_text("⛔ Perintah khusus admin.")
+        return
+
+    args = getattr(context, "args", []) or []
+    if not args:
+        await update.message.reply_text("Gunakan: /grant TELEGRAM_ID [tier]")
+        return
+    try:
+        target_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("TELEGRAM_ID harus angka.")
+        return
+    tier = args[1].lower() if len(args) > 1 else "pro"
+
+    from app.db import create_user, init_db, set_user_tier
+
+    await init_db()
+    ok = await set_user_tier(target_id, tier)
+    if not ok:
+        await create_user(target_id, tier=tier)
+    await update.message.reply_text(
+        f"✅ User {target_id} di-set ke tier *{tier.upper()}*.", parse_mode="Markdown"
+    )
+
+
 async def rgng_command(update, context):
     """/rgng TICKER — show IDX board (RG/NG/TN) for a symbol."""
     args = getattr(context, "args", []) or []
@@ -207,6 +257,8 @@ def build_application():
     app.add_handler(CommandHandler("why", why_command))
     app.add_handler(CommandHandler("track", track_command))
     app.add_handler(CommandHandler("rgng", rgng_command))
+    app.add_handler(CommandHandler("subscribe", subscribe_command))
+    app.add_handler(CommandHandler("grant", grant_command))
     return app
 
 

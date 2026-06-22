@@ -41,10 +41,21 @@ class Settings(BaseSettings):
     ANTHROPIC_AUTH_TOKEN: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
+    # Access control
+    ADMIN_TELEGRAM_ID: int = 0
+    ADMIN_KEY: str = ""
+
     # Ops
     LOG_LEVEL: str = "INFO"
     ENABLE_SCHEDULER: bool = True
     ENABLE_BOT_POLLING: bool = True
+
+    def effective_admin_key(self) -> str:
+        """Return ADMIN_KEY, generating a random one if unset (per-process)."""
+        if not self.ADMIN_KEY:
+            import uuid
+            self.ADMIN_KEY = uuid.uuid4().hex
+        return self.ADMIN_KEY
 
     def effective_telegram_chat_id(self) -> str:
         """Return TELEGRAM_CHAT_ID falling back to TELEGRAM_GROUP_ID."""

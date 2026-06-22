@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -177,6 +177,22 @@ class BacktestResult(Base):
     outcome: Mapped[str] = mapped_column(String(16), default="expired")
     score: Mapped[float] = mapped_column(Float, default=0.0)
     sector: Mapped[str] = mapped_column(String(64), default="Unknown")
+
+
+class User(Base):
+    """A subscriber/user with an access tier."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    full_name: Mapped[str] = mapped_column(String(128), default="")
+    tier: Mapped[str] = mapped_column(String(16), default="free")  # free/pro/admin
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    joined_at: Mapped[str] = mapped_column(String(32), default="")
+    expires_at: Mapped[str] = mapped_column(String(32), default="")  # pro expiry
+    signal_count: Mapped[int] = mapped_column(Integer, default=0)  # signals sent
 
 
 engine = create_async_engine(settings.DATABASE_URL, echo=False, future=True)
@@ -508,6 +524,103 @@ async def list_backtest_runs(limit: int = 20) -> List[Dict]:
                 "created_at": r.created_at,
             }
             for r in rows
+        ]
+
+
+async def create_user(
+    telegram_id: int,
+    username: str = "",
+    full_name: str = "",
+    tier: str = "free",
+) -> int:
+    """Create a user row and return its id (no-op id if already exists)."""
+    existing = await get_user_by_telegram_id(telegram_id)
+    if existing is not None:
+        return existing.id
+    async with async_session() as db:
+        user = User(
+            telegram_id=telegram_id,
+            username=username,
+            full_name=full_name,
+            tier=tier,
+            active=True,
+            joined_at=datetime.utcnow().isoformat(),
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        return user.id
+
+
+async def get_user_by_telegram_id(telegram_id: int) -> Optional["User"]:
+    """Return the User for a telegram_id, or None."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def set_user_tier(telegram_id: int, tier: str, expires_at: str = "") -> bool:
+    """Set a user's tier. Returns True if the user existed."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        )
+        user = result.scalar_one_or_none()
+        if user is None:
+            return False
+        user.tier = tier
+        if expires_at:
+            user.expires_at = expires_at
+        await db.commit()
+        return True
+
+
+async def increment_signal_count(telegram_id: int, amount: int = 1) -> None:
+    """Increment a user's daily signal counter."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        )
+        user = result.scalar_one_or_none()
+        if user is not None:
+            user.signal_count = (user.signal_count or 0) + amount
+            await db.commit()
+
+
+async def reset_signal_counts() -> None:
+    """Reset all users' daily signal counters to zero."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(select(User))
+        for user in result.scalars().all():
+            user.signal_count = 0
+        await db.commit()
+
+
+async def list_users(limit: int = 200) -> List[Dict]:
+    """Return users as dicts for admin views."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(select(User).order_by(User.id.desc()).limit(limit))
+        rows = result.scalars().all()
+        return [
+            {
+                "id": u.id,
+                "telegram_id": u.telegram_id,
+                "username": u.username,
+                "full_name": u.full_name,
+                "tier": u.tier,
+                "active": u.active,
+                "joined_at": u.joined_at,
+                "expires_at": u.expires_at,
+                "signal_count": u.signal_count,
+            }
+            for u in rows
         ]
 
 
