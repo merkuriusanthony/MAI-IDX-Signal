@@ -4832,4 +4832,11 @@ def get_industry(symbol: str) -> str:
 
 
 def get_profile(symbol: str) -> dict:
-    return IDX_SECTORS.get(symbol.upper().replace('.JK', ''), {'sector': 'Unknown', 'industry': '', 'name': ''})
+    from app.data.boards import get_board
+
+    d = dict(IDX_SECTORS.get(
+        symbol.upper().replace('.JK', ''),
+        {'sector': 'Unknown', 'industry': '', 'name': ''},
+    ))
+    d["board"] = get_board(symbol)
+    return d

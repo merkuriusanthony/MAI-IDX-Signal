@@ -9,8 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.data.sectors import get_sector
+from app.data.sectors import get_profile, get_sector
 from app.db import Signal, ScanRun, Tracking, async_session, get_session
+
+BOARD_COLOR = {"RG": "text-blue-400", "NG": "text-orange-400", "TN": "text-yellow-400"}
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -90,9 +92,12 @@ async def index(db: AsyncSession = Depends(get_session)):
     for s in rows:
         action = s.action or s.label
         color = ACTION_COLOR.get(action, "text-gray-300")
+        board = get_profile(s.symbol).get("board", "RG")
+        board_color = BOARD_COLOR.get(board, "text-gray-400")
         cells.append(
             "<tr class='border-b border-gray-800 hover:bg-gray-900'>"
             f"<td class='p-2 font-semibold'><a href='/dashboard/symbols/{s.symbol}' class='text-blue-400 hover:underline'>{s.symbol}</a></td>"
+            f"<td class='p-2 {board_color} text-xs font-bold'>{board}</td>"
             f"<td class='p-2 {color} font-bold'>{action}</td>"
             f"<td class='p-2'>{s.score:.1f}</td>"
             f"<td class='p-2'>{s.entry:,.0f}</td>"
@@ -106,7 +111,7 @@ async def index(db: AsyncSession = Depends(get_session)):
     table = (
         "<div class='overflow-x-auto'><table class='w-full text-sm'>"
         "<thead><tr class='text-left bg-gray-900 text-gray-400'>"
-        "<th class='p-2'>Symbol</th><th class='p-2'>Action</th>"
+        "<th class='p-2'>Symbol</th><th class='p-2'>Board</th><th class='p-2'>Action</th>"
         "<th class='p-2'>Score</th><th class='p-2'>Entry</th>"
         "<th class='p-2'>TP1</th><th class='p-2'>TP2</th><th class='p-2'>SL</th>"
         "<th class='p-2'>Waktu</th><th class='p-2'></th>"
@@ -142,6 +147,8 @@ async def signal_detail(signal_id: int, db: AsyncSession = Depends(get_session))
 
     action = s.action or s.label
     color = ACTION_COLOR.get(action, "text-gray-300")
+    board = get_profile(s.symbol).get("board", "RG")
+    board_color = BOARD_COLOR.get(board, "text-gray-400")
     chart_html = ""
     if s.chart_path:
         fname = s.chart_path.split("/")[-1]
@@ -150,7 +157,8 @@ async def signal_detail(signal_id: int, db: AsyncSession = Depends(get_session))
     reason_html = "".join(f"<li class='text-sm text-gray-300'>• {r}</li>" for r in reasons)
     body = (
         f"<div class='bg-gray-900 p-6 rounded-lg max-w-2xl'>"
-        f"<h2 class='text-xl font-bold {color}'>{s.symbol} — {action}</h2>"
+        f"<h2 class='text-xl font-bold {color}'>{s.symbol} — {action} "
+        f"<span class='{board_color} text-sm'>[{board}]</span></h2>"
         f"<p class='text-gray-400 text-sm mb-4'>{str(s.created_at)[:19]}</p>"
         f"<div class='grid grid-cols-2 gap-4 mb-4'>"
         f"<div><p class='text-gray-500 text-xs'>Score</p><p class='text-xl font-bold'>{s.score:.1f}/100</p></div>"

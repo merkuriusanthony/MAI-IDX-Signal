@@ -134,6 +134,30 @@ async def why_command(update, context):
     await msg.edit_text(text, parse_mode="Markdown")
 
 
+async def rgng_command(update, context):
+    """/rgng TICKER — show IDX board (RG/NG/TN) for a symbol."""
+    args = getattr(context, "args", []) or []
+    if not args:
+        await update.message.reply_text("Gunakan: /rgng TICKER")
+        return
+    symbol = args[0].upper()
+
+    from app.data.boards import get_board
+    from app.data.sectors import get_profile
+
+    board = get_board(symbol)
+    profile = get_profile(symbol)
+    board_label = {"RG": "Regular", "NG": "Negotiated", "TN": "Tunai"}.get(board, board)
+    name = profile.get("name") or symbol
+    sector = profile.get("sector", "Unknown")
+    text = (
+        f"*{symbol}* — {name}\n"
+        f"Papan: *{board}* ({board_label})\n"
+        f"Sektor: {sector}"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
 async def track_command(update, context):
     """/track — show open signals with live PnL."""
     from app.db import list_latest_signals
@@ -182,6 +206,7 @@ def build_application():
     app.add_handler(CommandHandler("scan", scan_command))
     app.add_handler(CommandHandler("why", why_command))
     app.add_handler(CommandHandler("track", track_command))
+    app.add_handler(CommandHandler("rgng", rgng_command))
     return app
 
 
