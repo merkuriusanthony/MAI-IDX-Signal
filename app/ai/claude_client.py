@@ -49,6 +49,11 @@ async def call_claude(
     """
     model = model or settings.CLAUDE_MODEL
     base_url = (base_url or settings.ANTHROPIC_BASE_URL).rstrip("/")
+    # The base URL may or may not already include a trailing /v1 (9Router and
+    # some gateways are configured with it). Normalize so we never emit
+    # .../v1/v1/messages, which 404s and silently triggers the fallback.
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3]
     auth_token = auth_token or settings.ANTHROPIC_AUTH_TOKEN
 
     if not auth_token:
