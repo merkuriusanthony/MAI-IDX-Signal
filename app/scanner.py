@@ -6,6 +6,7 @@ import logging
 from typing import Dict, List, Optional
 
 from app.analytics.indicators import compute_features
+from app.analytics.regime import apply_regime_gate, detect_regime
 from app.analytics.scoring import gorengan_penalty, score_snapshot
 from app.config import settings
 from app.data.fetch_yahoo import df_to_ohlcv_rows, fetch_ohlcv_safe
@@ -68,6 +69,13 @@ class ScannerService:
         try:
             sem = asyncio.Semaphore(self.concurrency)
 
+            # Phase 5.2: detect market regime once per scan (IHSG ^JKSE).
+            # Fetch is blocking yfinance -> run in executor. Fails open.
+            loop = asyncio.get_event_loop()
+            regime = await loop.run_in_executor(None, detect_regime)
+            logger.info("[scanner] regime=%s ok=%s reason=%s",
+                        regime.regime, regime.ok, regime.reason)
+
             async def _process(symbol: str) -> Optional[Dict]:
                 nonlocal scanned, passed, failed
                 async with sem:
@@ -115,10 +123,20 @@ class ScannerService:
                     })
                     final_score = max(0.0, score_dict["score"] - penalty)
 
+                    # Phase 5.2: market-regime gate. In a risk-off tape,
+                    # downgrade BUY -> WATCH so we stop firing longs into a
+                    # falling market. Fails open if regime undetected.
+                    gated_action, was_gated, gate_note = apply_regime_gate(
+                        score_dict["action"], regime
+                    )
+                    reason_codes = list(score_dict.get("reason_codes", []))
+                    if was_gated:
+                        reason_codes.append("REGIME_RISK_OFF")
+
                     candidate = {
                         "symbol": symbol,
                         "score": final_score,
-                        "action": score_dict["action"],
+                        "action": gated_action,
                         "close": snap.close,
                         "volume": int(snap.volume_latest),
                         "value_estimate": value_est,
@@ -129,7 +147,9 @@ class ScannerService:
                         "ma200": snap.ma200 or 0,
                         "volume_ratio": snap.volume_ratio,
                         "risk_score": 0.0,
-                        "reason_codes": score_dict.get("reason_codes", []),
+                        "reason_codes": reason_codes,
+                        "regime": regime.regime,
+                        "regime_gated": was_gated,
                         "snapshot": snap.to_dict(),
                         "_df": df,
                         "_snap": snap,
@@ -194,6 +214,7 @@ class ScannerService:
                 "scanned": scanned,
                 "passed": passed,
                 "failed": failed,
+                "regime": regime.to_dict(),
                 "top_signals": signals,
                 "status": "success",
             }

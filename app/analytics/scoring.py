@@ -14,11 +14,15 @@ from app.analytics.indicators import FeatureSnapshot
 VALID_LABELS = {"BUY", "WATCH", "HOLD", "AVOID", "DANGER"}
 
 # Score → action thresholds
+# Phase 5.2: lowered by ~10 after removing 12 phantom points (sector+5/flow+7).
+# Those constants used to inflate every score uniformly; thresholds were
+# calibrated against the inflated scale. Removing the constants without
+# lowering thresholds would collapse the alert population.
 _THRESHOLDS = [
-    (75, "BUY"),
-    (60, "WATCH"),
-    (45, "HOLD"),
-    (30, "AVOID"),
+    (65, "BUY"),
+    (50, "WATCH"),
+    (38, "HOLD"),
+    (25, "AVOID"),
 ]
 
 
@@ -209,14 +213,12 @@ def score_snapshot(snap: FeatureSnapshot) -> Dict:
     points += max(-15, min(15, risk_pts))
 
     # ------------------------------------------------------------------
-    # Market/sector placeholder 0–10 (neutral 5)
+    # Phase 5.2: phantom market/sector (+5) and flow (+7) buckets REMOVED.
+    # They were hardcoded constants applied to every stock — pure offset,
+    # zero discrimination. Real sector relative-strength / foreign-flow
+    # integration is deferred (see PHASE5_RESEARCH.md §1). Until then we do
+    # not gift free points. Thresholds lowered ~10 to compensate.
     # ------------------------------------------------------------------
-    points += 5
-
-    # ------------------------------------------------------------------
-    # Flow placeholder 0–15 (neutral 7)
-    # ------------------------------------------------------------------
-    points += 7
 
     final = round(max(0.0, min(100.0, points)), 1)
     action = _action_for(final)

@@ -34,7 +34,10 @@ def _read_parquet_cache(path: str) -> Optional[pd.DataFrame]:
 
 def _to_jk(symbol: str) -> str:
     s = symbol.upper().strip()
-    return s if s.endswith(".JK") else f"{s}.JK"
+    # Index tickers (e.g. ^JKSE) and already-suffixed symbols pass through.
+    if s.startswith("^") or s.endswith(".JK"):
+        return s
+    return f"{s}.JK"
 
 
 def _strip_jk(symbol: str) -> str:
