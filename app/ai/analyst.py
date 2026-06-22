@@ -53,6 +53,7 @@ def build_analyst_prompt(
     score_dict: Dict,
     indicators: Dict,
     news: List[Dict],
+    news_classification: Optional[Dict] = None,
 ) -> str:
     """Prompt Claude to judge a signal in light of recent news."""
     news_lines = [
@@ -75,6 +76,8 @@ def build_analyst_prompt(
         },
         "recent_news": news_lines or "tidak ada berita relevan",
     }
+    if news_classification:
+        payload["news_classification"] = news_classification
     return (
         f"{ANALYST_SYSTEM}\n"
         f"Skema respons:\n{ANALYST_SCHEMA}\n\n"
@@ -86,18 +89,82 @@ def build_analyst_prompt(
     )
 
 
+NEWS_CLASSIFY_SYSTEM = (
+    "Anda asisten riset BEI. Ringkas & klasifikasi berita mentah untuk satu "
+    "emiten. JANGAN beri rekomendasi beli/jual — hanya fakta & klasifikasi. "
+    "Balas HANYA JSON valid.\n"
+)
+
+NEWS_CLASSIFY_SCHEMA = """{
+  "items": [
+    {"headline_id": string (ringkas 1 kalimat),
+     "event_type": "earnings"|"ma"|"rights_issue"|"dividend"|"lawsuit"|"regulatory"|"other"|"none",
+     "sentiment": "positive"|"neutral"|"negative",
+     "materiality": "high"|"medium"|"low"}
+  ],
+  "aggregate_sentiment": "positive"|"neutral"|"negative"|"none",
+  "max_materiality": "high"|"medium"|"low"|"none"
+}"""
+
+
+def build_news_classify_prompt(symbol: str, news: List[Dict]) -> str:
+    """Haiku stage: cheap per-symbol news classification (no decision)."""
+    raw = [{"title": n.get("title"), "date": n.get("date"), "source": n.get("source")}
+           for n in (news or [])]
+    return (
+        f"{NEWS_CLASSIFY_SYSTEM}\n"
+        f"Skema:\n{NEWS_CLASSIFY_SCHEMA}\n\n"
+        f"Emiten: {symbol}\n"
+        f"Berita mentah:\n{json.dumps(raw, ensure_ascii=False, indent=2)}\n\n"
+        "Klasifikasi tiap berita lalu agregasi. Output JSON saja."
+    )
+
+
+async def classify_news(symbol: str, news: List[Dict]) -> Dict:
+    """Haiku stage. Returns classification dict (or fallback)."""
+    from app.ai.claude_client import call_claude
+
+    if not news:
+        return {"items": [], "aggregate_sentiment": "none", "max_materiality": "none"}
+    prompt = build_news_classify_prompt(symbol, news)
+    return await call_claude(prompt, model=settings.CLAUDE_HAIKU_MODEL, max_tokens=800)
+
+
 async def analyze_signal(
     symbol: str,
     score_dict: Dict,
     indicators: Dict,
     news: Optional[List[Dict]] = None,
 ) -> Dict:
-    """Run the analyst. Returns the parsed dict (or deterministic fallback)."""
+    """Two-stage AI analyst.
+
+    Stage 1 (HAIKU): cheap per-symbol news classification fan-out.
+    Stage 2 (OPUS):  high-stakes decision — verdict + final analysis,
+                     fed the pre-classified news. Decisions MUST use opus.
+
+    Returns the parsed decision dict (or deterministic fallback).
+    """
     from app.ai.claude_client import call_claude
 
-    prompt = build_analyst_prompt(symbol, score_dict, indicators, news or [])
-    # Use the cheap model for per-symbol fan-out.
-    result = await call_claude(prompt, model=settings.CLAUDE_HAIKU_MODEL)
+    # Stage 1 — haiku classifies the raw headlines (orthogonal signal prep).
+    news_class: Dict = {}
+    if news:
+        try:
+            news_class = await classify_news(symbol, news)
+        except Exception:
+            news_class = {}
+
+    # Stage 2 — opus makes the actual call, given technicals + classified news.
+    prompt = build_analyst_prompt(symbol, score_dict, indicators, news or [],
+                                  news_classification=news_class)
+    result = await call_claude(prompt, model=settings.CLAUDE_DECISION_MODEL,
+                               max_tokens=1024)
+    if isinstance(result, dict) and not result.get("_fallback"):
+        # surface the haiku aggregate for transparency / gate fallbacks
+        result.setdefault("news_sentiment",
+                          news_class.get("aggregate_sentiment", "none"))
+        result.setdefault("materiality",
+                          news_class.get("max_materiality", "none"))
     return result
 
 

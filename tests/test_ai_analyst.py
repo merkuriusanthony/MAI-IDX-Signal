@@ -113,3 +113,22 @@ def test_parse_rss_bad_xml_returns_empty():
 def test_company_query_strips_suffix():
     q = news_mod._company_query("BBCA.JK")
     assert "BBCA" in q
+
+
+# --- two-stage model routing (haiku classify -> opus decision) -------------
+
+def test_news_classify_prompt_has_schema():
+    from app.ai.analyst import build_news_classify_prompt
+    news = [{"title": "BBCA rights issue", "date": "x", "source": "y"}]
+    p = build_news_classify_prompt("BBCA", news)
+    assert "aggregate_sentiment" in p
+    assert "rights issue" in p
+    assert "BBCA" in p
+
+
+def test_analyst_prompt_includes_classification():
+    score_dict = {"score": 70, "action": "BUY"}
+    cls = {"aggregate_sentiment": "negative", "max_materiality": "high"}
+    p = build_analyst_prompt("XXXX", score_dict, {"close": 1}, [], news_classification=cls)
+    assert "news_classification" in p
+    assert "negative" in p

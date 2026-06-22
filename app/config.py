@@ -39,9 +39,11 @@ class Settings(BaseSettings):
     # AI (Anthropic-compatible endpoint, e.g. 9Router)
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     ANTHROPIC_AUTH_TOKEN: str = ""
-    CLAUDE_MODEL: str = "claude-sonnet-4-6"
-    # Phase 5.4: cheap model for per-symbol news/sentiment fan-out.
-    CLAUDE_HAIKU_MODEL: str = "claude-haiku-4-5"
+    CLAUDE_MODEL: str = "cc/claude-opus-4-8"
+    # Phase 5.4: cheap model for per-symbol news classification fan-out.
+    CLAUDE_HAIKU_MODEL: str = "cc/claude-haiku-4-5-20251001"
+    # Decision model: verdict + final analysis MUST use opus (high stakes).
+    CLAUDE_DECISION_MODEL: str = "cc/claude-opus-4-8"
     # AI gating: let Claude's verdict/sentiment actually move the action.
     AI_VERDICT_ENABLED: bool = True   # verdict=reject downgrades BUY->WATCH
     AI_NEWS_ENABLED: bool = True      # fetch + classify news per top candidate
