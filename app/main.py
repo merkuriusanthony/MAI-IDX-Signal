@@ -18,7 +18,7 @@ from app.pages.landing import router as landing_router
 from app.pages.member import router as member_router
 from app.signals.routes import chart_router, scan_router, signals_router
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
