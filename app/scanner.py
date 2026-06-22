@@ -5,6 +5,11 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 
+from app.analytics.archetype import (
+    archetype_adjust,
+    archetype_for_regime,
+    mtf_weekly_filter,
+)
 from app.analytics.indicators import compute_features
 from app.analytics.regime import apply_regime_gate, detect_regime
 from app.analytics.scoring import gorengan_penalty, score_snapshot
@@ -54,6 +59,58 @@ class ScannerService:
 
     # ------------------------------------------------------------------
 
+    async def _apply_ai_analyst(self, sig: Dict) -> None:
+        """Run the AI analyst on a built signal and apply the AI gate.
+
+        Mutates ``sig`` in place: sets ai_* fields, may downgrade BUY->WATCH,
+        and prepends AI drivers to the reason list. Fails open.
+        """
+        import asyncio as _asyncio
+
+        from app.ai.analyst import analyze_signal, apply_ai_gate
+        from app.ai.news import fetch_news
+
+        symbol = sig["symbol"]
+        news: List[Dict] = []
+        if settings.AI_NEWS_ENABLED:
+            loop = _asyncio.get_event_loop()
+            news = await loop.run_in_executor(None, fetch_news, symbol)
+
+        score_dict = {
+            "score": sig["score"],
+            "action": sig["action"],
+            "reason_codes": sig.get("reason_codes", []),
+        }
+        ai = await analyze_signal(symbol, score_dict, sig.get("snapshot", {}), news)
+
+        sig["ai_verdict"] = ai.get("verdict")
+        sig["ai_news_sentiment"] = ai.get("news_sentiment")
+        sig["ai_event_type"] = ai.get("event_type")
+        sig["ai_materiality"] = ai.get("materiality")
+        sig["news_count"] = len(news)
+        if ai.get("summary_id") and not ai.get("_fallback"):
+            sig["summary"] = ai["summary_id"]
+
+        new_action, gated, note = apply_ai_gate(sig["action"], ai)
+        if gated:
+            sig["action"] = new_action
+            sig["label"] = new_action
+            sig["ai_gated"] = True
+            sig["ai_gate_note"] = note
+            codes = list(sig.get("reason_codes", []))
+            codes.append("AI_VETO")
+            sig["reason_codes"] = codes
+            sig["reasons"] = [note] + list(sig.get("reasons", []))
+            logger.info("[scanner] AI gate %s: %s", symbol, note)
+        else:
+            sig["ai_gated"] = False
+
+        drivers = ai.get("key_drivers") or []
+        if drivers and not ai.get("_fallback"):
+            sig["reasons"] = list(drivers) + list(sig.get("reasons", []))
+
+    # ------------------------------------------------------------------
+
     async def run(self) -> Dict:
         """Execute full scan, return summary dict."""
         universe_count = len(self.universe)
@@ -75,6 +132,11 @@ class ScannerService:
             regime = await loop.run_in_executor(None, detect_regime)
             logger.info("[scanner] regime=%s ok=%s reason=%s",
                         regime.regime, regime.ok, regime.reason)
+
+            # Phase 5.3: pick a scoring archetype from the regime. Momentum
+            # in risk-on, mean-reversion in risk-off, balanced otherwise.
+            archetype = archetype_for_regime(regime.regime, regime.ok)
+            logger.info("[scanner] archetype=%s", archetype)
 
             async def _process(symbol: str) -> Optional[Dict]:
                 nonlocal scanned, passed, failed
@@ -108,6 +170,20 @@ class ScannerService:
 
                     score_dict = score_snapshot(snap)
 
+                    # Phase 5.3: archetype adjustment. Nudge the base trend
+                    # score toward the regime's archetype (momentum vs
+                    # mean-reversion), then re-derive the action so the
+                    # threshold logic sees the adjusted score.
+                    from app.analytics.scoring import _action_for
+                    arch_score, arch_reasons, arch_codes = archetype_adjust(
+                        snap, score_dict["score"], archetype
+                    )
+                    score_dict["score"] = arch_score
+                    score_dict["action"] = _action_for(arch_score)
+                    score_dict["label"] = score_dict["action"]
+                    if arch_reasons:
+                        score_dict["reasons"] = arch_reasons + score_dict.get("reasons", [])
+
                     # anti-gorengan penalty
                     daily_change = 0.0
                     if len(df) >= 2 and df["close"].iloc[-2]:
@@ -129,9 +205,19 @@ class ScannerService:
                     gated_action, was_gated, gate_note = apply_regime_gate(
                         score_dict["action"], regime
                     )
+
+                    # Phase 5.3: multi-timeframe gate. Downgrade a BUY that
+                    # fights the weekly trend (weekly close < weekly MA20).
+                    mtf_action, mtf_gated, mtf_note = mtf_weekly_filter(df, gated_action)
+                    if mtf_gated:
+                        gated_action = mtf_action
+
                     reason_codes = list(score_dict.get("reason_codes", []))
+                    reason_codes.extend(arch_codes)
                     if was_gated:
                         reason_codes.append("REGIME_RISK_OFF")
+                    if mtf_gated:
+                        reason_codes.append("MTF_WEEKLY_BEARISH")
 
                     candidate = {
                         "symbol": symbol,
@@ -150,6 +236,8 @@ class ScannerService:
                         "reason_codes": reason_codes,
                         "regime": regime.regime,
                         "regime_gated": was_gated,
+                        "archetype": archetype,
+                        "mtf_gated": mtf_gated,
                         "snapshot": snap.to_dict(),
                         "_df": df,
                         "_snap": snap,
@@ -188,6 +276,17 @@ class ScannerService:
                     )
                     if sig is None:
                         continue
+
+                    # Phase 5.4: AI analyst layer. For BUY/WATCH, fetch recent
+                    # news, have Claude (haiku) judge materiality/sentiment +
+                    # emit a verdict, and let a 'reject'/negative-material read
+                    # downgrade a BUY. Fails open on any error.
+                    if self.with_ai and sig["action"] in ("BUY", "WATCH"):
+                        try:
+                            await self._apply_ai_analyst(sig)
+                        except Exception as exc:
+                            logger.warning("AI analyst error for %s: %s",
+                                           cand["symbol"], exc)
                     if self.generate_charts:
                         df = cand.get("_df")
                         if df is not None:

@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     ANTHROPIC_AUTH_TOKEN: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
+    # Phase 5.4: cheap model for per-symbol news/sentiment fan-out.
+    CLAUDE_HAIKU_MODEL: str = "claude-haiku-4-5"
+    # AI gating: let Claude's verdict/sentiment actually move the action.
+    AI_VERDICT_ENABLED: bool = True   # verdict=reject downgrades BUY->WATCH
+    AI_NEWS_ENABLED: bool = True      # fetch + classify news per top candidate
+    NEWS_LOOKBACK_DAYS: int = 7
+    NEWS_MAX_ITEMS: int = 6
+    NEWS_CACHE_TTL: int = 60 * 60     # 1h per-symbol news cache
 
     # Access control
     ADMIN_TELEGRAM_ID: int = 0
