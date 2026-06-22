@@ -40,15 +40,25 @@ Scan once from the CLI:
 python scripts/scan_once.py
 ```
 
-Health check: `GET http://localhost:8000/health` → `{"status":"ok","version":"0.1.0"}`
+Health check: `GET http://localhost:8000/health` → `{"status":"ok","version":"0.6.0"}`
 
 ## API
 
 - `GET /health` — liveness
+- `GET /api/health` — liveness (JSON)
+- `GET /api/status` — operational status: version, DB connectivity, key
+  table presence, latest signal/scan metadata, scheduler flag
+- `GET /api/signals/latest?limit=20` — latest persisted signals
+- `POST /api/backtest` — queue a backtest run (non-blocking); returns a
+  queued `run_id`
+- `POST /api/backtest/run` — alias of `POST /api/backtest`
+- `GET /api/backtest/runs` — latest backtest runs
+- `GET /api/backtest/runs/{run_id}` — run detail + limited trade results
 - `GET /signals/{symbol}` — single signal
-- `GET /scan?top_n=5&limit=10` — scan universe, top signals
 - `GET /dashboard/` — latest signals (HTML)
+- `GET /dashboard/status` — ops page (version, DB, tables, latest scan)
 - `GET /dashboard/performance` — win rate / avg PnL
+- `GET /dashboard/backtest` — backtest results (HTML)
 - `GET /dashboard/symbols/{ticker}` — per-symbol history
 
 ## Docker deploy
@@ -65,6 +75,15 @@ curl http://<nas-ip>:7843/health
 On Synology the compose file lives at
 `/volume1/docker/mai-idx-signal/docker-compose.yml` with data volume
 `./data:/app/data`.
+
+### Public domain mapping
+
+Map the public domain to the NAS app port (configure in Cloudflare /
+tunnel manually — not from code):
+
+```text
+mai.claireantonia.id -> NAS:7843
+```
 
 ### CI/CD
 

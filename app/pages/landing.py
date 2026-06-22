@@ -24,6 +24,13 @@ LANDING_HTML = """<!doctype html>
       px-8 py-3 rounded-lg font-semibold mr-3">Buka Dashboard</a>
     <a href="#tiers" class="inline-block border border-gray-700 hover:bg-gray-900
       px-8 py-3 rounded-lg font-semibold">Lihat Paket</a>
+    <nav class="mt-8 flex flex-wrap justify-center gap-4 text-sm text-blue-400">
+      <a href="/dashboard" class="hover:underline">Dashboard</a>
+      <a href="/dashboard/status" class="hover:underline">Status</a>
+      <a href="/dashboard/backtest" class="hover:underline">Backtest</a>
+      <a href="/member" class="hover:underline">Member</a>
+      <a href="/admin" class="hover:underline">Admin</a>
+    </nav>
   </header>
 
   <section class="max-w-5xl mx-auto px-6 py-12">
