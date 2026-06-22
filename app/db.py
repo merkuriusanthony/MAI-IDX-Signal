@@ -195,7 +195,12 @@ class User(Base):
     signal_count: Mapped[int] = mapped_column(Integer, default=0)  # signals sent
 
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False, future=True)
+_connect_args = (
+    {"timeout": 30} if settings.DATABASE_URL.startswith("sqlite") else {}
+)
+engine = create_async_engine(
+    settings.DATABASE_URL, echo=False, future=True, connect_args=_connect_args
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -203,6 +208,11 @@ async def init_db() -> None:
     """Create all tables if they do not exist."""
     from sqlalchemy import text
     async with engine.begin() as conn:
+        # WAL lets background backtest writers and API readers coexist
+        # without "database is locked" under SQLite.
+        if settings.DATABASE_URL.startswith("sqlite"):
+            await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            await conn.exec_driver_sql("PRAGMA busy_timeout=30000")
         await conn.run_sync(Base.metadata.create_all)
         # ensure data dir exists
         import os
@@ -413,21 +423,49 @@ async def create_backtest_run(
     universe_size: int,
     start_date: str = "",
     end_date: str = "",
+    status: str = "running",
 ) -> int:
-    """Create a backtest run row and return its id."""
+    """Create a backtest run row and return its id.
+
+    status defaults to "running" for back-compat; pass "queued" for the
+    non-blocking background flow.
+    """
     async with async_session() as db:
         run = BacktestRun(
             strategy=strategy,
             universe_size=universe_size,
             start_date=start_date,
             end_date=end_date,
-            status="running",
+            status=status,
             created_at=datetime.utcnow().isoformat(),
         )
         db.add(run)
         await db.commit()
         await db.refresh(run)
         return run.id
+
+
+async def set_backtest_run_status(run_id: int, status: str) -> None:
+    """Update only the status of a backtest run (lifecycle transition)."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(select(BacktestRun).where(BacktestRun.id == run_id))
+        run = result.scalar_one_or_none()
+        if run:
+            run.status = status
+            await db.commit()
+
+
+async def fail_backtest_run(run_id: int, error: str = "") -> None:
+    """Mark a backtest run as failed, recording the error in summary_json."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(select(BacktestRun).where(BacktestRun.id == run_id))
+        run = result.scalar_one_or_none()
+        if run:
+            run.status = "failed"
+            run.summary_json = json.dumps({"error": error}, ensure_ascii=False)
+            await db.commit()
 
 
 async def save_backtest_result(run_id: int, result: Dict) -> int:
@@ -458,7 +496,7 @@ async def finish_backtest_run(run_id: int, summary: Dict) -> None:
         result = await db.execute(select(BacktestRun).where(BacktestRun.id == run_id))
         run = result.scalar_one_or_none()
         if run:
-            run.status = "success"
+            run.status = "completed"
             run.total_signals = int(summary.get("total_signals", 0))
             run.win_rate = float(summary.get("win_rate", 0.0))
             run.avg_return = float(summary.get("avg_return", 0.0))
@@ -501,6 +539,32 @@ async def get_backtest_results(run_id: Optional[int] = None) -> List[Dict]:
             }
             for r in rows
         ]
+
+
+async def get_backtest_run(run_id: int) -> Optional[Dict]:
+    """Return one backtest run as a dict, or None if missing."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(select(BacktestRun).where(BacktestRun.id == run_id))
+        r = result.scalar_one_or_none()
+        if r is None:
+            return None
+        try:
+            summary = json.loads(r.summary_json) if r.summary_json else {}
+        except Exception:
+            summary = {}
+        return {
+            "id": r.id,
+            "strategy": r.strategy,
+            "universe_size": r.universe_size,
+            "total_signals": r.total_signals,
+            "win_rate": r.win_rate,
+            "avg_return": r.avg_return,
+            "max_drawdown": r.max_drawdown,
+            "status": r.status,
+            "created_at": r.created_at,
+            "summary": summary,
+        }
 
 
 async def list_backtest_runs(limit: int = 20) -> List[Dict]:
