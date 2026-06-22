@@ -11,6 +11,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.backtest.routes import router as backtest_router
 from app.dashboard.routes import router as dashboard_router
 from app.db import init_db
 from app.signals.routes import chart_router, scan_router, signals_router
@@ -90,6 +91,7 @@ app.include_router(signals_router)
 app.include_router(scan_router)
 app.include_router(chart_router)
 app.include_router(dashboard_router)
+app.include_router(backtest_router)
 
 
 @app.get("/", include_in_schema=False)

@@ -23,6 +23,7 @@ def _page(title: str, body: str, nav: str = "") -> str:
         "<a href='/dashboard/performance' class='mr-4 hover:underline'>Performa</a>"
         "<a href='/dashboard/sectors' class='mr-4 hover:underline'>Sektor</a>"
         "<a href='/dashboard/scans' class='mr-4 hover:underline'>Scan Runs</a>"
+        "<a href='/dashboard/backtest' class='mr-4 hover:underline'>Backtest</a>"
     )
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"

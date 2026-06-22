@@ -142,6 +142,43 @@ class ScanCandidate(Base):
     snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
+class BacktestRun(Base):
+    """A backtest run over a set of symbols."""
+
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy: Mapped[str] = mapped_column(String(64), default="default")
+    universe_size: Mapped[int] = mapped_column(Integer, default=0)
+    start_date: Mapped[str] = mapped_column(String(16), default="")
+    end_date: Mapped[str] = mapped_column(String(16), default="")
+    total_signals: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_return: Mapped[float] = mapped_column(Float, default=0.0)
+    max_drawdown: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), default="running")
+    created_at: Mapped[str] = mapped_column(String(32), default="")
+    summary_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class BacktestResult(Base):
+    """A single simulated trade from a backtest run."""
+
+    __tablename__ = "backtest_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, index=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    entry_date: Mapped[str] = mapped_column(String(16), default="")
+    exit_date: Mapped[str] = mapped_column(String(16), default="")
+    entry_price: Mapped[float] = mapped_column(Float, default=0.0)
+    exit_price: Mapped[float] = mapped_column(Float, default=0.0)
+    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    outcome: Mapped[str] = mapped_column(String(16), default="expired")
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    sector: Mapped[str] = mapped_column(String(64), default="Unknown")
+
+
 engine = create_async_engine(settings.DATABASE_URL, echo=False, future=True)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -353,6 +390,125 @@ async def list_latest_signals(limit: int = 50) -> List[Dict]:
                 "created_at": r.created_at.isoformat() if r.created_at else "",
             })
         return out
+
+
+async def create_backtest_run(
+    strategy: str,
+    universe_size: int,
+    start_date: str = "",
+    end_date: str = "",
+) -> int:
+    """Create a backtest run row and return its id."""
+    async with async_session() as db:
+        run = BacktestRun(
+            strategy=strategy,
+            universe_size=universe_size,
+            start_date=start_date,
+            end_date=end_date,
+            status="running",
+            created_at=datetime.utcnow().isoformat(),
+        )
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        return run.id
+
+
+async def save_backtest_result(run_id: int, result: Dict) -> int:
+    """Persist one simulated trade and return its id."""
+    async with async_session() as db:
+        row = BacktestResult(
+            run_id=run_id,
+            symbol=result.get("symbol", ""),
+            entry_date=str(result.get("entry_date", ""))[:16],
+            exit_date=str(result.get("exit_date", ""))[:16],
+            entry_price=float(result.get("entry_price", 0.0)),
+            exit_price=float(result.get("exit_price", 0.0)),
+            pnl_pct=float(result.get("pnl_pct", 0.0)),
+            outcome=result.get("outcome", "expired"),
+            score=float(result.get("score", 0.0)),
+            sector=result.get("sector", "Unknown"),
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        return row.id
+
+
+async def finish_backtest_run(run_id: int, summary: Dict) -> None:
+    """Mark a backtest run finished and store summary metrics."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(select(BacktestRun).where(BacktestRun.id == run_id))
+        run = result.scalar_one_or_none()
+        if run:
+            run.status = "success"
+            run.total_signals = int(summary.get("total_signals", 0))
+            run.win_rate = float(summary.get("win_rate", 0.0))
+            run.avg_return = float(summary.get("avg_return", 0.0))
+            run.max_drawdown = float(summary.get("max_drawdown", 0.0))
+            run.summary_json = json.dumps(summary, ensure_ascii=False)
+            await db.commit()
+
+
+async def get_backtest_results(run_id: Optional[int] = None) -> List[Dict]:
+    """Return backtest result rows; latest run if run_id is None."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        rid = run_id
+        if rid is None:
+            latest = await db.execute(
+                select(BacktestRun).order_by(BacktestRun.id.desc()).limit(1)
+            )
+            run = latest.scalar_one_or_none()
+            if run is None:
+                return []
+            rid = run.id
+        result = await db.execute(
+            select(BacktestResult)
+            .where(BacktestResult.run_id == rid)
+            .order_by(BacktestResult.id)
+        )
+        rows = result.scalars().all()
+        return [
+            {
+                "run_id": r.run_id,
+                "symbol": r.symbol,
+                "entry_date": r.entry_date,
+                "exit_date": r.exit_date,
+                "entry_price": r.entry_price,
+                "exit_price": r.exit_price,
+                "pnl_pct": r.pnl_pct,
+                "outcome": r.outcome,
+                "score": r.score,
+                "sector": r.sector,
+            }
+            for r in rows
+        ]
+
+
+async def list_backtest_runs(limit: int = 20) -> List[Dict]:
+    """Return latest backtest runs as dicts."""
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(
+            select(BacktestRun).order_by(BacktestRun.id.desc()).limit(limit)
+        )
+        rows = result.scalars().all()
+        return [
+            {
+                "id": r.id,
+                "strategy": r.strategy,
+                "universe_size": r.universe_size,
+                "total_signals": r.total_signals,
+                "win_rate": r.win_rate,
+                "avg_return": r.avg_return,
+                "max_drawdown": r.max_drawdown,
+                "status": r.status,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ]
 
 
 async def update_signal_status(signal_id: int, update: Dict) -> None:
