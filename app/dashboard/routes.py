@@ -24,6 +24,7 @@ def _page(title: str, body: str, nav: str = "") -> str:
         "<a href='/dashboard/sectors' class='mr-4 hover:underline'>Sektor</a>"
         "<a href='/dashboard/scans' class='mr-4 hover:underline'>Scan Runs</a>"
         "<a href='/dashboard/backtest' class='mr-4 hover:underline'>Backtest</a>"
+        "<a href='/dashboard/status' class='mr-4 hover:underline'>Status</a>"
     )
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -381,6 +382,86 @@ async def scans_list(db: AsyncSession = Depends(get_session)):
         "</tr></thead><tbody>" + "".join(cells) + "</tbody></table></div>"
     )
     return _page("Scan Runs", table)
+
+
+@router.get("/status", response_class=HTMLResponse)
+async def status_page():
+    """Ops page: app version, DB status, table status, latest scan/signals,
+    plus quick links to the rest of the app."""
+    from app.db import get_db_status
+    from app.main import VERSION
+
+    db = await get_db_status()
+    conn = db.get("connected")
+    conn_color = "text-green-400" if conn else "text-red-400"
+
+    cards = (
+        "<div class='grid grid-cols-2 md:grid-cols-4 gap-4 mb-6'>"
+        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Versi</p>"
+        f"<p class='text-2xl font-bold'>{VERSION}</p></div>"
+        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Database</p>"
+        f"<p class='text-2xl font-bold {conn_color}'>{'OK' if conn else 'DOWN'}</p></div>"
+        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Total Sinyal</p>"
+        f"<p class='text-2xl font-bold'>{db.get('signal_count', 0)}</p></div>"
+        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Sinyal Terbaru</p>"
+        f"<p class='text-sm font-semibold'>{(db.get('latest_signal_at') or '-')[:19]}</p></div>"
+        "</div>"
+    )
+
+    table_rows = "".join(
+        f"<tr class='border-b border-gray-800'><td class='p-2'>{name}</td>"
+        f"<td class='p-2 {'text-green-400' if present else 'text-red-400'} font-semibold'>"
+        f"{'ada' if present else 'tidak ada'}</td></tr>"
+        for name, present in (db.get("tables") or {}).items()
+    )
+    tables_block = (
+        "<div class='bg-gray-900 p-4 rounded-lg mb-6'>"
+        "<h2 class='text-lg font-semibold mb-3'>Tabel Database</h2>"
+        "<table class='w-full text-sm'><thead><tr class='text-left text-gray-400'>"
+        "<th class='p-2'>Tabel</th><th class='p-2'>Status</th></tr></thead><tbody>"
+        + (table_rows or "<tr><td class='p-2 text-gray-500' colspan='2'>-</td></tr>")
+        + "</tbody></table></div>"
+    )
+
+    scan = db.get("latest_scan")
+    if scan:
+        scan_block = (
+            "<div class='bg-gray-900 p-4 rounded-lg mb-6'>"
+            "<h2 class='text-lg font-semibold mb-3'>Scan Terakhir</h2>"
+            f"<p class='text-sm text-gray-300'>#{scan['id']} · {scan['mode']} · "
+            f"<span class='font-semibold'>{scan['status']}</span> · "
+            f"passed {scan['passed_count']}/{scan['scanned_count']} · "
+            f"{(scan.get('started_at') or '')[:19]}</p></div>"
+        )
+    else:
+        scan_block = (
+            "<div class='bg-gray-900 p-4 rounded-lg mb-6'>"
+            "<h2 class='text-lg font-semibold mb-3'>Scan Terakhir</h2>"
+            "<p class='text-sm text-gray-500'>Belum ada scan.</p></div>"
+        )
+
+    err_block = (
+        f"<div class='bg-red-900/40 p-4 rounded-lg mb-6'><p class='text-sm text-red-300'>"
+        f"Error: {db['error']}</p></div>"
+        if db.get("error")
+        else ""
+    )
+
+    links = (
+        "<div class='bg-gray-900 p-4 rounded-lg'>"
+        "<h2 class='text-lg font-semibold mb-3'>Tautan</h2>"
+        "<div class='flex flex-wrap gap-3 text-sm text-blue-400'>"
+        "<a href='/dashboard' class='hover:underline'>Dashboard</a>"
+        "<a href='/dashboard/performance' class='hover:underline'>Performa</a>"
+        "<a href='/dashboard/sectors' class='hover:underline'>Sektor</a>"
+        "<a href='/dashboard/backtest' class='hover:underline'>Backtest</a>"
+        "<a href='/admin' class='hover:underline'>Admin</a>"
+        "<a href='/member' class='hover:underline'>Member</a>"
+        "<a href='/api/status' class='hover:underline'>/api/status (JSON)</a>"
+        "</div></div>"
+    )
+
+    return _page("Status", cards + err_block + tables_block + scan_block + links)
 
 
 @router.get("/symbols/{ticker}", response_class=HTMLResponse)
