@@ -73,6 +73,8 @@ class ScannerService:
                 async with sem:
                     result = fetch_ohlcv_safe(symbol)
                     scanned += 1
+                    if scanned % 100 == 0:
+                        logger.info("[scanner] progress %d/%d", scanned, universe_count)
                     if not result["ok"]:
                         failed += 1
                         return None

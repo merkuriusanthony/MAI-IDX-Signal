@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     CHART_DIR: str = "./data/charts"
 
     # Scanner
-    SCAN_CONCURRENCY: int = 8
+    SCAN_CONCURRENCY: int = 20
     SCAN_TOP_N: int = 5
     SCAN_MIN_AVG_VALUE: float = 1_000_000_000  # 1B IDR
     SCAN_MIN_HISTORY_DAYS: int = 60

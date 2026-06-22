@@ -1,0 +1,72 @@
+Continue Phase 1 MAI-IDX-Signal. Current state:
+
+DONE so far:
+- 34 tests passing
+- Scanner API working: POST /api/scan returns BUY/WATCH/HOLD signals (BBCA BUY, BMRI BUY, ASII WATCH)
+- Container on NAS: mai-idx-signal Up (healthy), version 0.2.0
+- TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID injected in docker-compose on NAS
+- git commit afb0863 pushed
+
+WHAT IS MISSING — do these in order:
+
+1. TELEGRAM BOT — not started yet. The bot is in app/bots/telegram.py but NOT wired into lifespan.
+   Fix main.py to start the PTB bot as an asyncio background task in the lifespan context.
+   Requirements:
+   - Only start if TELEGRAM_BOT_TOKEN is set (non-empty, non-placeholder)
+   - Use python-telegram-bot v20 async pattern (not run_polling — that blocks. Use initialize/start/stop instead)
+   - Keep FastAPI running normally even if bot fails to start
+   - Add graceful shutdown in lifespan finally block
+   - Log clearly: "Telegram bot started" or "Telegram bot disabled (no token)"
+
+2. FULL SCAN with all 655 symbols — scripts/scan_once.py runs with --limit 5 only.
+   Change the default limit in scan_once.py to use /opt/data/idx_universe.txt (655 symbols) by default.
+   But keep --limit flag so we can override for testing.
+
+3. SCHEDULER — app/scheduler/jobs.py exists but not wired.
+   Wire APScheduler into lifespan: start on startup, shutdown on exit.
+   Schedule:
+   - 08:30 WIB (01:30 UTC) weekdays: pre_market_scan (mode=pre_market, limit=655, top_n=5)
+   - 09:15 WIB (02:15 UTC) weekdays: opening_scan (mode=opening, limit=655, top_n=5)
+   - 16:05 WIB (09:05 UTC) weekdays: eod_scan (mode=eod, limit=655, top_n=10)
+   Add ENABLE_SCHEDULER env var (default true) to allow disabling.
+
+4. TELEGRAM DELIVERY — after each scheduled scan, send top signals to Telegram group.
+   In scheduler jobs: after scan completes, call send_signal_batch(signals, chat_id) from app/bots/telegram.py
+   Format: use existing renderer for each signal, send chart image if exists.
+
+5. /dashboard root redirect — GET / currently returns 404. Add redirect from / to /dashboard.
+
+6. COMMIT + PUSH all changes.
+   - git add all modified files
+   - git commit -m "feat: wire bot, scheduler, full-scan, dashboard redirect"
+   - git push origin main (token in /opt/data/.env as GITHUB_TOKEN)
+
+7. REBUILD + REDEPLOY on Synology:
+   - On NAS SSH: sudo /usr/local/bin/docker build -t ghcr.io/merkuriusanthony/mai-idx-signal:latest .
+     NOTE: NAS cannot build. Instead trigger GitHub Actions:
+     set -a && . /opt/data/.env && set +a
+     gh workflow run docker.yml --repo merkuriusanthony/MAI-IDX-Signal (use GITHUB_TOKEN)
+     Poll until success: gh run list --repo merkuriusanthony/MAI-IDX-Signal --limit 1
+     Then on NAS: sudo /usr/local/bin/docker pull ghcr.io/merkuriusanthony/mai-idx-signal:latest
+     Then: sudo /usr/local/bin/docker compose -f /volume1/docker/mai-idx-signal/docker-compose.yml up -d --force-recreate
+
+8. VERIFY:
+   - curl http://192.168.1.20:7843/health → {"status":"ok"}
+   - curl -X POST http://192.168.1.20:7843/api/scan -H 'Content-Type: application/json' -d '{"mode":"manual","limit":5,"top_n":3}' → signals
+   - Check logs: sudo docker logs --tail 30 mai-idx-signal → should show "Telegram bot started" and "Scheduler started"
+   - curl http://192.168.1.20:7843/ → should redirect to /dashboard (302 or 200)
+
+9. TEST TELEGRAM: send a test scan to Telegram group -1004352444069 by calling:
+   curl -X POST http://192.168.1.20:7843/api/scan -H 'Content-Type: application/json' -d '{"mode":"manual","limit":5,"top_n":3,"generate_charts":true}'
+   Then check if messages arrived in the Telegram group. If delivery is separate (not triggered by API scan), create POST /api/signals/send-latest endpoint that reads latest signals from DB and sends to Telegram.
+
+10. FINAL SUMMARY: print table of everything working.
+
+CONSTRAINTS:
+- SSH to NAS: ssh -i /opt/data/home/.ssh/id_ed25519 -o StrictHostKeyChecking=no hermes@192.168.1.20
+- NAS docker binary: sudo /usr/local/bin/docker
+- NAS can do NOPASSWD sudo /usr/local/bin/docker only
+- GITHUB_TOKEN in /opt/data/.env
+- Never commit .env or secrets
+- Run uv run pytest -q after changes to ensure tests still pass
+- uv is the python runner (not python directly for scripts)

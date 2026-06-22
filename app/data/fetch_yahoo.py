@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 PARQUET_CACHE_DIR = "/tmp/mai_idx_cache"
 PARQUET_CACHE_TTL = 60 * 30  # 30 min
+RETRY_ATTEMPTS = 3  # retry yfinance on 429 rate-limit with backoff
 
 
 def _parquet_path(symbol: str, period: str, interval: str) -> str:
@@ -66,14 +67,27 @@ def fetch_ohlcv(
     try:
         import yfinance as yf
 
-        raw = yf.download(
-            ticker_jk,
-            period=period,
-            interval=interval,
-            progress=False,
-            auto_adjust=False,
-            timeout=15,
-        )
+        raw = None
+        last_exc: Optional[Exception] = None
+        for attempt in range(RETRY_ATTEMPTS):
+            try:
+                raw = yf.download(
+                    ticker_jk,
+                    period=period,
+                    interval=interval,
+                    progress=False,
+                    auto_adjust=False,
+                    timeout=15,
+                )
+                break
+            except Exception as exc:  # retry on rate-limit, give up otherwise
+                last_exc = exc
+                if "429" in str(exc) and attempt < RETRY_ATTEMPTS - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise
+        if raw is None and last_exc is not None:
+            raise last_exc
     except Exception as exc:
         logger.warning("yfinance download failed for %s: %s", ticker_jk, exc)
         return _empty(internal)
