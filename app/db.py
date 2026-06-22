@@ -198,6 +198,31 @@ class User(Base):
 _connect_args = (
     {"timeout": 30} if settings.DATABASE_URL.startswith("sqlite") else {}
 )
+
+
+def _ensure_sqlite_parent_dirs() -> None:
+    """Ensure relative/absolute SQLite database parent dirs exist before first connect."""
+    import os
+    from urllib.parse import urlparse
+
+    os.makedirs(settings.CHART_DIR, exist_ok=True)
+    url = settings.DATABASE_URL
+    if not url.startswith("sqlite"):
+        return
+    parsed = urlparse(url)
+    db_path = parsed.path
+    if parsed.netloc:
+        db_path = f"/{parsed.netloc}{parsed.path}"
+    if db_path.startswith("/") and not url.startswith("sqlite+aiosqlite:////"):
+        # sqlite:///./data/foo.db parses as /./data/foo.db; treat as relative.
+        db_path = db_path.lstrip("/")
+    if db_path and db_path not in {":memory:", "/:memory:"}:
+        parent = os.path.dirname(db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+
+_ensure_sqlite_parent_dirs()
 engine = create_async_engine(
     settings.DATABASE_URL, echo=False, future=True, connect_args=_connect_args
 )
@@ -206,7 +231,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 async def init_db() -> None:
     """Create all tables if they do not exist."""
-    from sqlalchemy import text
+    _ensure_sqlite_parent_dirs()
     async with engine.begin() as conn:
         # WAL lets background backtest writers and API readers coexist
         # without "database is locked" under SQLite.
@@ -214,9 +239,6 @@ async def init_db() -> None:
             await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             await conn.exec_driver_sql("PRAGMA busy_timeout=30000")
         await conn.run_sync(Base.metadata.create_all)
-        # ensure data dir exists
-        import os
-        os.makedirs("data/charts", exist_ok=True)
 
 
 async def get_session() -> AsyncSession:
