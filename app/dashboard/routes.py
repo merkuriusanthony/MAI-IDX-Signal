@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -10,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.data.sectors import get_profile, get_sector
-from app.db import Signal, ScanRun, Tracking, async_session, get_session
+from app.db import Signal, ScanRun, Tracking, async_session, get_session, _utcnow
 
 BOARD_COLOR = {"RG": "text-blue-400", "NG": "text-orange-400", "TN": "text-yellow-400"}
 
@@ -243,7 +242,7 @@ async def performance(db: AsyncSession = Depends(get_session)):
         t = track_by_sig.get(s.id)
         exit_price = t.current_price if t else s.entry
         pnl = t.pnl_pct if t else 0.0
-        holding = (datetime.utcnow() - s.created_at).days if s.created_at else 0
+        holding = (_utcnow() - s.created_at).days if s.created_at else 0
         label, lcolor = _STATUS_LABEL.get(s.status, (s.status, "text-gray-400"))
         pnl_color = "text-green-400" if pnl > 0 else "text-red-400" if pnl < 0 else "text-gray-400"
         closed_cells.append(
@@ -272,7 +271,7 @@ async def performance(db: AsyncSession = Depends(get_session)):
 
     # top-3 sectors by win rate (last 7 days signals)
     from datetime import timedelta
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = _utcnow() - timedelta(days=7)
     recent_res = await db.execute(select(Signal).where(Signal.created_at >= cutoff))
     for s in recent_res.scalars().all():
         sec = get_sector(s.symbol)
@@ -304,7 +303,7 @@ async def sectors(db: AsyncSession = Depends(get_session)):
     """Rank IDX sectors by avg signal score over the last 7 days."""
     from datetime import timedelta
 
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = _utcnow() - timedelta(days=7)
     result = await db.execute(select(Signal).where(Signal.created_at >= cutoff))
     rows = result.scalars().all()
     if not rows:

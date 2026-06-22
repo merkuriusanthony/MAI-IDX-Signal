@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import importlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -77,7 +77,7 @@ async def test_tracker_marks_expired(tmp_path, monkeypatch):
     async with db_mod.async_session() as db:
         res = await db.execute(select(db_mod.Signal).where(db_mod.Signal.id == sig_id))
         sig = res.scalar_one()
-        sig.created_at = datetime.utcnow() - timedelta(days=25)
+        sig.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=25)
         await db.commit()
 
     monkeypatch.setattr(

@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import Signal, SignalUpdate, Tracking, async_session
+from app.db import Signal, SignalUpdate, Tracking, async_session, _utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +107,7 @@ async def update_all_open_signals() -> Dict:
             created = sig.created_at
             days = 0
             if created:
-                days = (datetime.utcnow() - created).days
+                days = (_utcnow() - created).days
 
             await _update_signal_full(
                 sig.id,
@@ -177,7 +176,7 @@ async def _update_signal_full(
         # write update row
         su = SignalUpdate(
             signal_id=signal_id,
-            checked_at=datetime.utcnow().isoformat(),
+            checked_at=_utcnow().isoformat(),
             last_price=last_price,
             max_price=max_price,
             min_price=min_price,

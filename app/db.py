@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+
+def _utcnow() -> datetime:
+    """Naive UTC now (drop-in for the deprecated datetime.utcnow())."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.ext.asyncio import (
@@ -26,7 +31,7 @@ class Signal(Base):
     __tablename__ = "signals"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
     scan_run_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     symbol: Mapped[str] = mapped_column(String(16), index=True)
     action: Mapped[str] = mapped_column(String(16))
@@ -79,7 +84,7 @@ class Tracking(Base):
     pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(16), default="OPEN")
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=_utcnow, onupdate=_utcnow
     )
 
 
@@ -265,7 +270,7 @@ async def save_ohlcv(symbol: str, rows: List[Dict], source: str = "yahoo") -> No
                 close=float(row.get("close", 0)),
                 volume=int(row.get("volume", 0)),
                 source=source,
-                created_at=datetime.utcnow().isoformat(),
+                created_at=_utcnow().isoformat(),
             ).on_conflict_do_nothing(index_elements=["symbol", "date", "source"])
             await db.execute(stmt)
         await db.commit()
@@ -300,7 +305,7 @@ async def create_scan_run(mode: str, universe_count: int) -> int:
     """Create a new scan run and return its id."""
     async with async_session() as db:
         run = ScanRun(
-            started_at=datetime.utcnow().isoformat(),
+            started_at=_utcnow().isoformat(),
             mode=mode,
             universe_count=universe_count,
             status="running",
@@ -325,7 +330,7 @@ async def finish_scan_run(
         result = await db.execute(select(ScanRun).where(ScanRun.id == scan_run_id))
         run = result.scalar_one_or_none()
         if run:
-            run.finished_at = datetime.utcnow().isoformat()
+            run.finished_at = _utcnow().isoformat()
             run.status = status
             run.scanned_count = scanned
             run.passed_count = passed
@@ -459,7 +464,7 @@ async def create_backtest_run(
             start_date=start_date,
             end_date=end_date,
             status=status,
-            created_at=datetime.utcnow().isoformat(),
+            created_at=_utcnow().isoformat(),
         )
         db.add(run)
         await db.commit()
@@ -630,7 +635,7 @@ async def create_user(
             full_name=full_name,
             tier=tier,
             active=True,
-            joined_at=datetime.utcnow().isoformat(),
+            joined_at=_utcnow().isoformat(),
         )
         db.add(user)
         await db.commit()
@@ -796,7 +801,7 @@ async def update_signal_status(signal_id: int, update: Dict) -> None:
         # write update row
         su = SignalUpdate(
             signal_id=signal_id,
-            checked_at=datetime.utcnow().isoformat(),
+            checked_at=_utcnow().isoformat(),
             last_price=float(update.get("last_price", 0)),
             max_price=float(update.get("max_price", 0)),
             min_price=float(update.get("min_price", 0)),
