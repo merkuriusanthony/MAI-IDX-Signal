@@ -522,7 +522,7 @@ async def finish_backtest_run(run_id: int, summary: Dict) -> None:
             run.total_signals = int(summary.get("total_signals", 0))
             run.win_rate = float(summary.get("win_rate", 0.0))
             run.avg_return = float(summary.get("avg_return", 0.0))
-            run.max_drawdown = float(summary.get("max_drawdown", 0.0))
+            run.max_drawdown = float(summary.get("max_equity_drawdown", summary.get("max_drawdown", 0.0)))
             run.summary_json = json.dumps(summary, ensure_ascii=False)
             await db.commit()
 

@@ -162,6 +162,9 @@ class ScannerService:
                         cand["symbol"],
                         with_ai=self.with_ai,
                         min_history=settings.SCAN_MIN_HISTORY_DAYS,
+                        precomputed_df=cand.get("_df"),
+                        precomputed_snap=cand.get("_snap"),
+                        precomputed_value=cand.get("value_estimate"),
                     )
                     if sig is None:
                         continue

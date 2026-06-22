@@ -82,14 +82,24 @@ async def _build_one(
     with_ai: bool = False,
     min_history: int = 20,
     min_rr: float = 1.2,
+    precomputed_df=None,
+    precomputed_snap=None,
+    precomputed_value: Optional[float] = None,
 ) -> Optional[Dict]:
-    result = fetch_ohlcv_safe(symbol, min_rows=min_history)
-    if not result["ok"]:
-        logger.debug("skip %s: %s", symbol, result["error"])
-        return None
+    # Reuse scanner-fetched data when available (kills double-fetch).
+    if precomputed_df is not None and precomputed_snap is not None:
+        df = precomputed_df
+        snap = precomputed_snap
+        value_estimate = precomputed_value if precomputed_value is not None else 0.0
+    else:
+        result = fetch_ohlcv_safe(symbol, min_rows=min_history)
+        if not result["ok"]:
+            logger.debug("skip %s: %s", symbol, result["error"])
+            return None
+        df = result["df"]
+        snap = compute_features(df, symbol=symbol)
+        value_estimate = result["value_estimate"]
 
-    df = result["df"]
-    snap = compute_features(df, symbol=symbol)
     if not snap.data_ok:
         return None
 
@@ -135,7 +145,7 @@ async def _build_one(
         "risk_reward": levels["risk_reward"],
         "close": snap.close,
         "volume": int(snap.volume_latest),
-        "value_estimate": result["value_estimate"],
+        "value_estimate": value_estimate,
         "rsi": snap.rsi14,
         "ma20": snap.ma20,
         "ma50": snap.ma50,

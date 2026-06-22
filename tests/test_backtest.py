@@ -46,4 +46,6 @@ def test_summarize_empty_and_nonempty():
     s = summarize(trades)
     assert s["total_signals"] == 3
     assert 0 <= s["win_rate"] <= 100
-    assert s["max_drawdown"] == -3.0
+    assert s["worst_trade"] == -3.0           # was the mislabeled "max_drawdown"
+    assert s["max_equity_drawdown"] <= 0.0    # true peak-to-trough equity DD
+    assert s["profit_factor"] >= 0.0

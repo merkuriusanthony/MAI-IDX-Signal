@@ -197,15 +197,19 @@ async def backtest_page():
 
     summary = summarize(results)
     cards = (
-        "<div class='grid grid-cols-2 md:grid-cols-4 gap-4 mb-6'>"
+        "<div class='grid grid-cols-2 md:grid-cols-3 gap-4 mb-6'>"
         f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Total Trades</p>"
         f"<p class='text-2xl font-bold'>{summary['total_signals']}</p></div>"
         f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Win Rate</p>"
         f"<p class='text-2xl font-bold text-green-400'>{summary['win_rate']:.1f}%</p></div>"
-        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Avg Return</p>"
+        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Avg Return (net)</p>"
         f"<p class='text-2xl font-bold'>{summary['avg_return']:+.2f}%</p></div>"
-        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Max Drawdown</p>"
-        f"<p class='text-2xl font-bold text-red-400'>{summary['max_drawdown']:+.2f}%</p></div>"
+        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Profit Factor</p>"
+        f"<p class='text-2xl font-bold'>{summary.get('profit_factor', 0.0):.2f}</p></div>"
+        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Max Drawdown (equity)</p>"
+        f"<p class='text-2xl font-bold text-red-400'>{summary.get('max_equity_drawdown', 0.0):+.2f}%</p></div>"
+        f"<div class='bg-gray-900 p-4 rounded'><p class='text-xs text-gray-500'>Worst Trade</p>"
+        f"<p class='text-2xl font-bold text-red-400'>{summary.get('worst_trade', 0.0):+.2f}%</p></div>"
         "</div>"
     )
 

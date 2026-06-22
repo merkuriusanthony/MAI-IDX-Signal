@@ -13,11 +13,12 @@ logger = logging.getLogger(__name__)
 PARQUET_CACHE_DIR = "/tmp/mai_idx_cache"
 PARQUET_CACHE_TTL = 60 * 30  # 30 min
 RETRY_ATTEMPTS = 3  # retry yfinance on 429 rate-limit with backoff
+CACHE_VERSION = "v2adj"  # bump to invalidate stale caches (v2 = auto_adjust=True)
 
 
 def _parquet_path(symbol: str, period: str, interval: str) -> str:
     safe = symbol.replace(".", "_")
-    return os.path.join(PARQUET_CACHE_DIR, f"{safe}_{period}_{interval}.parquet")
+    return os.path.join(PARQUET_CACHE_DIR, f"{safe}_{period}_{interval}_{CACHE_VERSION}.parquet")
 
 
 def _read_parquet_cache(path: str) -> Optional[pd.DataFrame]:
@@ -76,7 +77,7 @@ def fetch_ohlcv(
                     period=period,
                     interval=interval,
                     progress=False,
-                    auto_adjust=False,
+                    auto_adjust=True,  # split/dividend-adjust whole OHLC bar
                     timeout=15,
                 )
                 break
