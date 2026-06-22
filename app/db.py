@@ -624,6 +624,81 @@ async def list_users(limit: int = 200) -> List[Dict]:
         ]
 
 
+_STATUS_TABLES = [
+    "signals",
+    "scan_runs",
+    "scan_candidates",
+    "backtest_runs",
+    "backtest_results",
+    "users",
+]
+
+
+async def get_db_status() -> Dict[str, Any]:
+    """Report DB connectivity, key table presence, and cheap latest metadata.
+
+    Never raises — failures are reported in the returned dict so /api/status
+    and /dashboard/status stay up even when the DB is missing or corrupt.
+    """
+    from sqlalchemy import func, select, text
+
+    status: Dict[str, Any] = {
+        "connected": False,
+        "url": settings.DATABASE_URL,
+        "tables": {},
+        "signal_count": 0,
+        "latest_signal_at": None,
+        "latest_scan": None,
+        "error": None,
+    }
+    try:
+        async with async_session() as db:
+            # connectivity
+            await db.execute(text("SELECT 1"))
+            status["connected"] = True
+
+            # which of the known tables exist
+            res = await db.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+            present = {row[0] for row in res.fetchall()}
+            status["tables"] = {t: (t in present) for t in _STATUS_TABLES}
+
+            if "signals" in present:
+                status["signal_count"] = (
+                    await db.execute(select(func.count(Signal.id)))
+                ).scalar() or 0
+                latest = (
+                    await db.execute(
+                        select(Signal).order_by(Signal.created_at.desc()).limit(1)
+                    )
+                ).scalar_one_or_none()
+                if latest is not None:
+                    status["latest_signal_at"] = (
+                        latest.created_at.isoformat() if latest.created_at else None
+                    )
+
+            if "scan_runs" in present:
+                run = (
+                    await db.execute(
+                        select(ScanRun).order_by(ScanRun.id.desc()).limit(1)
+                    )
+                ).scalar_one_or_none()
+                if run is not None:
+                    status["latest_scan"] = {
+                        "id": run.id,
+                        "mode": run.mode,
+                        "status": run.status,
+                        "started_at": run.started_at,
+                        "finished_at": run.finished_at,
+                        "passed_count": run.passed_count,
+                        "scanned_count": run.scanned_count,
+                    }
+    except Exception as exc:  # noqa: BLE001 — surface, never crash the probe
+        status["error"] = str(exc)
+    return status
+
+
 async def update_signal_status(signal_id: int, update: Dict) -> None:
     """Update signal status and add a signal_update row."""
     from sqlalchemy import select

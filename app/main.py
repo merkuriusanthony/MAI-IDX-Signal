@@ -108,3 +108,19 @@ async def health():
 @app.get("/api/health")
 async def api_health():
     return {"status": "ok", "version": VERSION}
+
+
+@app.get("/api/status")
+async def api_status():
+    """Operational status: version, DB connectivity, key table presence,
+    latest signal/scan metadata, and scheduler flag."""
+    from app.db import get_db_status
+
+    db_status = await get_db_status()
+    return {
+        "status": "ok" if db_status.get("connected") else "degraded",
+        "version": VERSION,
+        "scheduler_enabled": settings.ENABLE_SCHEDULER,
+        "bot_polling_enabled": settings.ENABLE_BOT_POLLING,
+        "database": db_status,
+    }
