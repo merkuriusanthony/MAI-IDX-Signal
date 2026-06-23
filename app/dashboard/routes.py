@@ -101,8 +101,20 @@ async def index(db: AsyncSession = Depends(get_session)):
         color = ACTION_COLOR.get(action, "text-gray-300")
         board = get_profile(s.symbol).get("board", "RG")
         board_color = BOARD_COLOR.get(board, "text-gray-400")
+        sl_val = s.stop_loss or s.sl
+        try:
+            ts = int(s.created_at.timestamp())
+        except Exception:
+            try:
+                from datetime import datetime as _dt
+                ts = int(_dt.fromisoformat(str(s.created_at)).timestamp())
+            except Exception:
+                ts = 0
         cells.append(
-            "<tr class='border-b border-gray-800 hover:bg-gray-900'>"
+            "<tr class='border-b border-gray-800 hover:bg-gray-900' "
+            f"data-symbol='{s.symbol}' data-action='{action}' data-board='{board}' "
+            f"data-score='{s.score}' data-entry='{s.entry}' data-tp1='{s.tp1}' "
+            f"data-tp2='{s.tp2}' data-sl='{sl_val}' data-ts='{ts}'>"
             f"<td class='p-2 font-semibold'><a href='/dashboard/symbols/{s.symbol}' class='text-blue-400 hover:underline'>{s.symbol}</a></td>"
             f"<td class='p-2 {board_color} text-xs font-bold'>{board}</td>"
             f"<td class='p-2 {color} font-bold'>{action}</td>"
@@ -110,21 +122,97 @@ async def index(db: AsyncSession = Depends(get_session)):
             f"<td class='p-2'>{s.entry:,.0f}</td>"
             f"<td class='p-2'>{s.tp1:,.0f}</td>"
             f"<td class='p-2'>{s.tp2:,.0f}</td>"
-            f"<td class='p-2 text-red-400'>{s.stop_loss or s.sl:,.0f}</td>"
+            f"<td class='p-2 text-red-400'>{sl_val:,.0f}</td>"
             f"<td class='p-2 text-xs text-gray-500'>{str(s.created_at)[:16]}</td>"
             f"<td class='p-2 text-xs'><a href='/dashboard/signals/{s.id}' class='text-blue-400 hover:underline'>detail</a></td>"
             "</tr>"
         )
+
+    # client-side search / filter / sort controls
+    controls = (
+        "<div class='mb-3 flex flex-wrap items-center gap-2'>"
+        "<div class='relative'>"
+        "<input id='sig-search' type='text' placeholder='Cari emiten…' "
+        "class='bg-gray-800 text-white text-sm rounded px-3 py-2 w-44 pr-7' "
+        "oninput='sigFilter()'>"
+        "<button id='sig-clear' type='button' onclick='sigClear()' "
+        "class='absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-sm hidden'>×</button>"
+        "</div>"
+        "<select id='sig-action' onchange='sigFilter()' class='bg-gray-800 text-white text-sm rounded px-2 py-2'>"
+        "<option value=''>Semua action</option>"
+        "<option value='BUY'>BUY</option><option value='WATCH'>WATCH</option>"
+        "<option value='AVOID'>AVOID</option><option value='DANGER'>DANGER</option>"
+        "</select>"
+        "<select id='sig-board' onchange='sigFilter()' class='bg-gray-800 text-white text-sm rounded px-2 py-2'>"
+        "<option value=''>Semua board</option>"
+        "<option value='RG'>RG</option><option value='NG'>NG</option><option value='TN'>TN</option>"
+        "</select>"
+        "<span id='sig-counter' class='text-xs text-gray-500 ml-1'></span>"
+        "</div>"
+    )
+
+    headers = [
+        ("Symbol", "symbol", "str"),
+        ("Board", "board", "str"),
+        ("Action", "action", "str"),
+        ("Score", "score", "num"),
+        ("Entry", "entry", "num"),
+        ("TP1", "tp1", "num"),
+        ("TP2", "tp2", "num"),
+        ("SL", "sl", "num"),
+        ("Waktu", "ts", "num"),
+    ]
+    head_cells = "".join(
+        f"<th class='p-2 cursor-pointer select-none hover:text-white' "
+        f"data-key='{key}' data-type='{typ}' onclick=\"sigSort('{key}','{typ}')\">"
+        f"{label}<span class='sort-arrow'></span></th>"
+        for label, key, typ in headers
+    )
     table = (
-        "<div class='overflow-x-auto'><table class='w-full text-sm'>"
+        "<div class='overflow-x-auto'><table id='signal-table' class='w-full text-sm'>"
         "<thead><tr class='text-left bg-gray-900 text-gray-400'>"
-        "<th class='p-2'>Symbol</th><th class='p-2'>Board</th><th class='p-2'>Action</th>"
-        "<th class='p-2'>Score</th><th class='p-2'>Entry</th>"
-        "<th class='p-2'>TP1</th><th class='p-2'>TP2</th><th class='p-2'>SL</th>"
-        "<th class='p-2'>Waktu</th><th class='p-2'></th>"
+        + head_cells
+        + "<th class='p-2'></th>"
         "</tr></thead><tbody>" + "".join(cells) + "</tbody></table></div>"
     )
-    return _page("Latest Signals", scan_form + table)
+
+    sig_js = (
+        "<script>"
+        "(function(){"
+        "var tbody=document.querySelector('#signal-table tbody');"
+        "var rows=Array.prototype.slice.call(tbody.querySelectorAll('tr'));"
+        "var total=rows.length;var sortKey=null,sortDir=1;"
+        "window.sigFilter=function(){"
+        "var q=(document.getElementById('sig-search').value||'').trim().toUpperCase();"
+        "var a=document.getElementById('sig-action').value;"
+        "var b=document.getElementById('sig-board').value;"
+        "document.getElementById('sig-clear').classList.toggle('hidden',!q);"
+        "var shown=0;"
+        "rows.forEach(function(r){"
+        "var ok=(!q||r.getAttribute('data-symbol').toUpperCase().indexOf(q)>=0)"
+        "&&(!a||r.getAttribute('data-action')===a)"
+        "&&(!b||r.getAttribute('data-board')===b);"
+        "r.style.display=ok?'':'none';if(ok)shown++;});"
+        "document.getElementById('sig-counter').textContent='Menampilkan '+shown+' dari '+total+' sinyal';"
+        "};"
+        "window.sigClear=function(){"
+        "document.getElementById('sig-search').value='';sigFilter();};"
+        "window.sigSort=function(key,type){"
+        "if(sortKey===key){sortDir=-sortDir;}else{sortKey=key;sortDir=1;}"
+        "rows.sort(function(x,y){"
+        "var vx=x.getAttribute('data-'+key),vy=y.getAttribute('data-'+key);"
+        "if(type==='num'){vx=parseFloat(vx)||0;vy=parseFloat(vy)||0;return (vx-vy)*sortDir;}"
+        "return vx.localeCompare(vy)*sortDir;});"
+        "rows.forEach(function(r){tbody.appendChild(r);});"
+        "document.querySelectorAll('#signal-table th .sort-arrow').forEach(function(s){s.textContent='';});"
+        "var th=document.querySelector(\"#signal-table th[data-key='\"+key+\"']\");"
+        "if(th)th.querySelector('.sort-arrow').textContent=sortDir>0?' \\u25B2':' \\u25BC';"
+        "};"
+        "sigFilter();"
+        "})();"
+        "</script>"
+    )
+    return _page("Latest Signals", scan_form + controls + table + sig_js)
 
 
 @router.post("/scan", response_class=HTMLResponse)
