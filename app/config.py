@@ -55,7 +55,15 @@ class Settings(BaseSettings):
         "https://www.idx.co.id/primary/StockData/GetSecuritiesStock"
         "?start=0&length=9999&code=&sector=&board=&language=en-us"
     )
+    # Cloudflare Worker proxy that fronts IDX_LISTED_URL from a non-DC IP.
+    # Empty = call IDX directly (blocked from datacenter/NAS IPs).
+    IDX_PROXY_URL: str = ""
     STOCKBIT_UNIVERSE_URL: str = "https://exodus.stockbit.com/findata-view/company/list"
+    # Authenticated search endpoint used to enumerate the full IDX universe.
+    STOCKBIT_SEARCH_URL: str = "https://exodus.stockbit.com/search/v2"
+    # Path (inside container) to a file holding a fresh Stockbit access JWT,
+    # written by the host token manager's daily refresh. Mounted via ./data.
+    STOCKBIT_ACCESS_FILE: str = "/app/data/.stockbit_access"
 
     # AI (Anthropic-compatible endpoint, e.g. 9Router)
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"

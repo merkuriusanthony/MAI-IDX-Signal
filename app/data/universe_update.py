@@ -58,18 +58,23 @@ def _normalize(symbols: List[str]) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def _fetch_idx() -> List[str]:
-    """Tier (a): IDX official securities-stock endpoint."""
+    """Tier (a): IDX official securities-stock list.
+
+    IDX blocks datacenter IPs (Cloudflare 403). When IDX_PROXY_URL is set we
+    fetch through a Cloudflare Worker proxy (residential-ish CF egress, not a
+    DC IP), which returns the IDX JSON verbatim. Falls back to a direct call
+    when no proxy is configured (works only from non-blocked IPs).
+    """
     import httpx
 
+    proxy = settings.IDX_PROXY_URL.strip()
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; MAI-IDX-Signal/1.0)",
         "Accept": "application/json, text/plain, */*",
         "Referer": "https://www.idx.co.id/en/market-data/stocks-data/stock-list/",
     }
-    resp = httpx.get(
-        settings.IDX_LISTED_URL, headers=headers, timeout=20.0,
-        follow_redirects=True,
-    )
+    url = proxy if proxy else settings.IDX_LISTED_URL
+    resp = httpx.get(url, headers=headers, timeout=30.0, follow_redirects=True)
     resp.raise_for_status()
     data = resp.json()
     # Response shape: {"data": [{"Code": "BBCA", ...}, ...]} (key casing varies).
@@ -85,50 +90,95 @@ def _fetch_idx() -> List[str]:
     return _normalize(syms)
 
 
-def _fetch_stockbit() -> List[str]:
-    """Tier (b): Stockbit company list (best-effort, may need auth).
+def _stockbit_token() -> str:
+    """Resolve a Stockbit access JWT.
 
-    If a session cookie/token is required but not configured, returns [] so
-    the caller falls through to the next tier instead of erroring.
+    Priority:
+      1. File at settings.STOCKBIT_ACCESS_FILE (written by the host token
+         manager's daily refresh; mounted into the container at /app/data).
+      2. settings.STOCKBIT_SESSION_COOKIE env (raw bearer or "Bearer ...").
+
+    Returns "" if neither yields a token.
     """
+    path = settings.STOCKBIT_ACCESS_FILE.strip()
+    if path and os.path.exists(path):
+        try:
+            tok = open(path, "r", encoding="utf-8").read().strip()
+            if tok:
+                return tok[7:].strip() if tok.lower().startswith("bearer ") else tok
+        except Exception as exc:
+            logger.debug("stockbit access file read failed: %s", exc)
+    cookie = settings.STOCKBIT_SESSION_COOKIE.strip()
+    if cookie:
+        return cookie[7:].strip() if cookie.lower().startswith("bearer ") else cookie
+    return ""
+
+
+def _fetch_stockbit() -> List[str]:
+    """Tier (b): enumerate the IDX universe via Stockbit ``/search/v2``.
+
+    Stockbit has no single company-list endpoint that works on datacenter IPs;
+    the reliable path is the authenticated search endpoint, queried with each
+    A-Z (and AA-ZZ) prefix and merged locally. Needs a bearer JWT; returns []
+    if no token is configured so the caller falls through to Yahoo.
+    """
+    import string
+    import time as _time
+
     import httpx
 
-    cookie = settings.STOCKBIT_SESSION_COOKIE.strip()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; MAI-IDX-Signal/1.0)",
-        "Accept": "application/json",
-    }
-    if cookie:
-        # Accept either a raw bearer token or a full Cookie string.
-        if cookie.lower().startswith("bearer ") or "." in cookie and " " not in cookie:
-            headers["Authorization"] = (
-                cookie if cookie.lower().startswith("bearer ") else f"Bearer {cookie}"
-            )
-        else:
-            headers["Cookie"] = cookie
+    token = _stockbit_token()
+    if not token:
+        logger.info("Stockbit universe: no access token configured — skipping tier")
+        return []
 
-    resp = httpx.get(
-        settings.STOCKBIT_UNIVERSE_URL, headers=headers, timeout=20.0,
-        follow_redirects=True,
-    )
-    if resp.status_code in (401, 403):
-        logger.info("Stockbit universe needs auth (HTTP %s) — skipping tier", resp.status_code)
-        return []
-    resp.raise_for_status()
-    data = resp.json()
-    rows = data.get("data") if isinstance(data, dict) else data
-    if isinstance(rows, dict):
-        rows = rows.get("companies") or rows.get("list") or []
-    if not isinstance(rows, list):
-        return []
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://stockbit.com",
+        "Referer": "https://stockbit.com/",
+    }
+    base = settings.STOCKBIT_SEARCH_URL
+    # 1-letter prefixes catch the bulk; 2-letter prefixes densify coverage.
+    prefixes = list(string.ascii_uppercase)
+    prefixes += [a + b for a in string.ascii_uppercase for b in string.ascii_uppercase]
     syms: List[str] = []
-    for row in rows:
-        if isinstance(row, dict):
-            code = row.get("symbol") or row.get("code") or row.get("ticker")
-            if code:
+    seen_auth_fail = False
+    with httpx.Client(timeout=20.0, headers=headers) as client:
+        for kw in prefixes:
+            try:
+                resp = client.get(base, params={"keyword": kw, "limit": 20})
+            except Exception as exc:
+                logger.debug("stockbit search %s failed: %s", kw, exc)
+                continue
+            if resp.status_code in (401, 403):
+                seen_auth_fail = True
+                logger.info("Stockbit search auth failed (HTTP %s) — aborting tier", resp.status_code)
+                break
+            if resp.status_code == 429:
+                _time.sleep(1.0)
+                continue
+            if resp.status_code != 200:
+                continue
+            try:
+                comps = resp.json().get("data", {}).get("companies", []) or []
+            except Exception:
+                continue
+            for c in comps:
+                code = c.get("id") or c.get("symbol")
+                ctype = c.get("type", "")
+                tradeable = c.get("is_tradeable", True)
+                if not code:
+                    continue
+                if ctype in ("COMPANY_TYPE_REKSA_DANA", "COMPANY_TYPE_ETF"):
+                    continue
+                if tradeable is False:
+                    continue
                 syms.append(code)
-        elif isinstance(row, str):
-            syms.append(row)
+            _time.sleep(0.12)  # rate-limit guard
+    if seen_auth_fail and not syms:
+        return []
     return _normalize(syms)
 
 
@@ -280,6 +330,7 @@ def _append_change_log(entry: Dict) -> None:
 def update_universe_file(
     path: Optional[str] = None,
     new_symbols: Optional[List[str]] = None,
+    allow_removal: Optional[bool] = None,
 ) -> Dict:
     """Fetch (or accept) the current symbol list, diff, and safely rewrite.
 
@@ -291,6 +342,13 @@ def update_universe_file(
       - "no_change" : list identical to current file
       - "aborted"   : sanity gate failed (empty / < min ratio) — old file kept
       - "error"     : fetch failed entirely
+
+    Removal policy (user-decided): symbols are only DROPPED when the
+    authoritative IDX official source confirms the list. Non-authoritative
+    sources (Stockbit /search/v2, Yahoo) return only *tradeable* tickers, so a
+    missing symbol may just be suspended/illiquid, not delisted. For those
+    sources we run ADDITIVE-ONLY: new IPOs are added, nothing is removed.
+    ``allow_removal`` overrides this heuristic when set explicitly.
     """
     from app.data.universe import load_universe
 
@@ -303,6 +361,12 @@ def update_universe_file(
         new_symbols, source = fetch_current_symbols()
     else:
         new_symbols, source = _normalize(new_symbols), "provided"
+
+    # Decide removal policy: only the authoritative IDX source (or an explicit
+    # caller-provided list) may delist. Auto-fetched Stockbit/Yahoo lists are
+    # additive-only because they return only *tradeable* tickers.
+    if allow_removal is None:
+        allow_removal = source in ("idx", "provided")
 
     result: Dict = {
         "status": "error",
@@ -333,6 +397,15 @@ def update_universe_file(
         return result
 
     added, removed = diff_universe(old_norm, new_symbols)
+
+    if not allow_removal and removed:
+        # Additive-only: keep every existing symbol, merge in the new ones.
+        merged = sorted(set(old_norm) | set(new_symbols))
+        new_symbols = merged
+        result["removal_suppressed"] = removed  # report for visibility
+        removed = []
+        result["new_count"] = len(new_symbols)
+
     result["added"] = added
     result["removed"] = removed
 
@@ -354,6 +427,7 @@ def update_universe_file(
         "new_count": len(new_symbols),
         "added": added,
         "removed": removed,
+        "removal_suppressed": result.get("removal_suppressed", []),
         "backup": backup,
     })
     logger.info(

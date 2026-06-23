@@ -133,6 +133,49 @@ def test_fetch_idx_wins_first(uni_env, monkeypatch):
     assert syms == ["TLKM", "ASII"]
 
 
+def test_stockbit_source_is_additive_only(uni_env, monkeypatch):
+    """Auto-fetched Stockbit list must NOT delist (only add IPOs)."""
+    upd, uni, current, *_ = uni_env
+    # stockbit drops 10 existing + adds 1 IPO. Removal must be suppressed.
+    fetched = current[10:] + ["ZZZZ"]
+    monkeypatch.setattr(upd, "_fetch_idx", lambda: [])
+    monkeypatch.setattr(upd, "_fetch_stockbit", lambda: fetched)
+    monkeypatch.setattr(upd, "_fetch_yahoo", lambda: [])
+    result = upd.update_universe_file()
+    assert result["source"] == "stockbit"
+    assert result["status"] == "updated"
+    assert result["added"] == ["ZZZZ"]
+    assert result["removed"] == []                       # nothing dropped
+    assert len(result["removal_suppressed"]) == 10       # but reported
+    written = uni.read_text().split()
+    assert "ZZZZ" in written
+    assert current[0] in written                         # existing kept
+
+
+def test_idx_source_allows_removal(uni_env, monkeypatch):
+    """Authoritative IDX source MAY delist."""
+    upd, uni, current, *_ = uni_env
+    fetched = current[5:] + ["ZZZZ"]
+    monkeypatch.setattr(upd, "_fetch_idx", lambda: fetched)
+    result = upd.update_universe_file()
+    assert result["source"] == "idx"
+    assert result["status"] == "updated"
+    assert result["removed"] == current[:5]
+    written = uni.read_text().split()
+    assert current[0] not in written                     # delisted
+
+
+def test_explicit_allow_removal_override(uni_env, monkeypatch):
+    """allow_removal=False forces additive-only even for IDX."""
+    upd, uni, current, *_ = uni_env
+    fetched = current[5:] + ["ZZZZ"]
+    monkeypatch.setattr(upd, "_fetch_idx", lambda: fetched)
+    result = upd.update_universe_file(allow_removal=False)
+    assert result["removed"] == []
+    assert result["added"] == ["ZZZZ"]
+    assert len(result["removal_suppressed"]) == 5
+
+
 @pytest.mark.asyncio
 async def test_scheduler_job_notifies_on_change(uni_env, monkeypatch):
     upd, uni, current, *_ = uni_env

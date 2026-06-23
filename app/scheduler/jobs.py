@@ -58,9 +58,10 @@ async def universe_update_job() -> None:
     status = result.get("status")
     added = result.get("added", [])
     removed = result.get("removed", [])
+    suppressed = result.get("removal_suppressed", [])
     logger.info(
-        "[universe] status=%s source=%s +%d -%d (%d->%d)",
-        status, result.get("source"), len(added), len(removed),
+        "[universe] status=%s source=%s +%d -%d (suppressed=%d) (%d->%d)",
+        status, result.get("source"), len(added), len(removed), len(suppressed),
         result.get("old_count", 0), result.get("new_count", 0),
     )
 
@@ -79,6 +80,12 @@ async def universe_update_job() -> None:
         f"🟢 *IPO/baru ({len(added)})*: {_fmt(added)}\n"
         f"🔴 *Delisting ({len(removed)})*: {_fmt(removed)}"
     )
+    if suppressed:
+        text += (
+            f"\n\n⚠️ *Tidak dihapus ({len(suppressed)})* — hilang dari "
+            f"{result.get('source')} tapi mungkin cuma suspended; tunggu "
+            f"konfirmasi IDX resmi: {_fmt(suppressed, 20)}"
+        )
     from app.bots.telegram import send_text_notify
     try:
         await send_text_notify(text)

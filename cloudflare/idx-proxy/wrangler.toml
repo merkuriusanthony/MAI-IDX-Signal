@@ -1,0 +1,15 @@
+name = "idx-proxy"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# Deploy:
+#   cd cloudflare/idx-proxy
+#   export CLOUDFLARE_API_TOKEN=<token with Workers Scripts:Edit + Workers KV optional>
+#   export CLOUDFLARE_ACCOUNT_ID=<account id>
+#   npx wrangler deploy
+#
+# Then set a shared secret (recommended):
+#   npx wrangler secret put PROXY_KEY
+#
+# Result URL: https://idx-proxy.<your-subdomain>.workers.dev/?key=<PROXY_KEY>
+# Put that URL in MAI-IDX-Signal .env as IDX_PROXY_URL.
