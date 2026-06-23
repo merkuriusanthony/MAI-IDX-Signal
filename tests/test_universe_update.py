@@ -133,6 +133,35 @@ def test_fetch_idx_wins_first(uni_env, monkeypatch):
     assert syms == ["TLKM", "ASII"]
 
 
+def test_extract_idx_codes_getemiten_shape(uni_env):
+    """GetEmiten returns a flat list of {KodeEmiten, NamaEmiten}."""
+    upd, *_ = uni_env
+    data = [
+        {"KodeEmiten": "bbca", "NamaEmiten": "Bank BCA"},
+        {"KodeEmiten": "BBRI", "NamaEmiten": "Bank BRI"},
+        {"KodeEmiten": "", "NamaEmiten": "junk"},
+    ]
+    assert upd._extract_idx_codes(data) == ["BBCA", "BBRI"]
+
+
+def test_extract_idx_codes_securitiesstock_shape(uni_env):
+    """GetSecuritiesStock wraps rows under data[] with Code key."""
+    upd, *_ = uni_env
+    data = {"data": [{"Code": "TLKM"}, {"Code": "asii"}]}
+    assert upd._extract_idx_codes(data) == ["ASII", "TLKM"]
+
+
+def test_fetch_idx_reads_emiten_file(uni_env, monkeypatch, tmp_path):
+    """Primary IDX path: read host-delivered emiten JSON file."""
+    upd, *_ = uni_env
+    f = tmp_path / ".idx_emiten.json"
+    f.write_text(json.dumps([{"KodeEmiten": "BBCA"}, {"KodeEmiten": "TLKM"}]))
+    import app.config as cfg
+    monkeypatch.setattr(cfg.settings, "IDX_EMITEN_FILE", str(f))
+    # httpx must NOT be called when the file resolves.
+    assert upd._fetch_idx() == ["BBCA", "TLKM"]
+
+
 def test_stockbit_source_is_additive_only(uni_env, monkeypatch):
     """Auto-fetched Stockbit list must NOT delist (only add IPOs)."""
     upd, uni, current, *_ = uni_env

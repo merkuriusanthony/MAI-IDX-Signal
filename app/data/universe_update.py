@@ -58,15 +58,40 @@ def _normalize(symbols: List[str]) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def _fetch_idx() -> List[str]:
-    """Tier (a): IDX official securities-stock list.
+    """Tier (a): IDX official emiten list (authoritative — may delist).
 
-    IDX blocks datacenter IPs (Cloudflare 403). When IDX_PROXY_URL is set we
-    fetch through a Cloudflare Worker proxy (residential-ish CF egress, not a
-    DC IP), which returns the IDX JSON verbatim. Falls back to a direct call
-    when no proxy is configured (works only from non-blocked IPs).
+    IDX (idx.co.id) sits behind Cloudflare and challenges datacenter/NAS IPs,
+    so the container cannot fetch it directly. Resolution order:
+
+      1. settings.IDX_EMITEN_FILE — a JSON list delivered by the host fetcher
+         (Hermes box has a non-blocked residential IP; a cron fetches
+         /primary/Helper/GetEmiten and writes the file into /app/data). This is
+         the primary path and the only one that reliably beats the CF challenge.
+      2. settings.IDX_PROXY_URL — optional HTTP proxy returning IDX JSON.
+      3. Direct call (works only from a non-blocked IP).
+
+    Returns [] on any failure so the caller falls through to Stockbit/Yahoo.
     """
+    import json as _json
+
     import httpx
 
+    # --- (1) host-delivered file -----------------------------------------
+    fpath = settings.IDX_EMITEN_FILE.strip()
+    if fpath and os.path.exists(fpath):
+        try:
+            raw = open(fpath, "r", encoding="utf-8").read().strip()
+            if raw:
+                data = _json.loads(raw)
+                syms = _extract_idx_codes(data)
+                if syms:
+                    logger.info("IDX universe: %d emiten from file %s", len(syms), fpath)
+                    return syms
+                logger.warning("IDX emiten file parsed but yielded 0 codes: %s", fpath)
+        except Exception as exc:
+            logger.warning("IDX emiten file read/parse failed (%s): %s", fpath, exc)
+
+    # --- (2)/(3) proxy or direct HTTP ------------------------------------
     proxy = settings.IDX_PROXY_URL.strip()
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; MAI-IDX-Signal/1.0)",
@@ -76,17 +101,31 @@ def _fetch_idx() -> List[str]:
     url = proxy if proxy else settings.IDX_LISTED_URL
     resp = httpx.get(url, headers=headers, timeout=30.0, follow_redirects=True)
     resp.raise_for_status()
-    data = resp.json()
-    # Response shape: {"data": [{"Code": "BBCA", ...}, ...]} (key casing varies).
+    return _extract_idx_codes(resp.json())
+
+
+def _extract_idx_codes(data) -> List[str]:
+    """Pull stock codes from any IDX response shape.
+
+    Handles both GetEmiten (list of {"KodeEmiten": ...}) and GetSecuritiesStock
+    ({"data": [{"Code": ...}]}) plus minor key-casing variants.
+    """
     rows = data.get("data") if isinstance(data, dict) else data
     if not isinstance(rows, list):
         return []
     syms: List[str] = []
     for row in rows:
         if isinstance(row, dict):
-            code = row.get("Code") or row.get("code") or row.get("StockCode")
+            code = (
+                row.get("KodeEmiten")
+                or row.get("Code")
+                or row.get("code")
+                or row.get("StockCode")
+            )
             if code:
                 syms.append(code)
+        elif isinstance(row, str):
+            syms.append(row)
     return _normalize(syms)
 
 

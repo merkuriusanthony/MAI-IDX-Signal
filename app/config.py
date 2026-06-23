@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     # Cloudflare Worker proxy that fronts IDX_LISTED_URL from a non-DC IP.
     # Empty = call IDX directly (blocked from datacenter/NAS IPs).
     IDX_PROXY_URL: str = ""
+    # Path (inside container) to a JSON list of IDX emiten, written by the host
+    # fetcher (Hermes box has a non-blocked residential IP). Primary IDX source
+    # since CF challenges the container's DC IP. Mounted via ./data.
+    IDX_EMITEN_FILE: str = "/app/data/.idx_emiten.json"
     STOCKBIT_UNIVERSE_URL: str = "https://exodus.stockbit.com/findata-view/company/list"
     # Authenticated search endpoint used to enumerate the full IDX universe.
     STOCKBIT_SEARCH_URL: str = "https://exodus.stockbit.com/search/v2"
