@@ -40,6 +40,15 @@ async def lifespan(app: FastAPI):
     # 2. DB
     await init_db()
 
+    # 2b. Reap orphaned scan runs left 'running' by a previous restart
+    try:
+        from app.db import reap_stale_scan_runs
+        n = await reap_stale_scan_runs()
+        if n:
+            logger.warning("Reaped %d stale scan run(s) on startup", n)
+    except Exception as exc:
+        logger.warning("Stale scan-run reaper error (non-fatal): %s", exc)
+
     # 3. Telegram bot (non-blocking PTB v20)
     # Use ENABLE_BOT_POLLING=false when another process owns the same token
     if settings.ENABLE_BOT_POLLING:

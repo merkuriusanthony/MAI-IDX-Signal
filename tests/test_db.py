@@ -77,6 +77,45 @@ async def test_create_and_finish_scan_run(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reap_stale_scan_runs(tmp_path, monkeypatch):
+    db_path = tmp_path / "t2reap.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+    import importlib
+    from datetime import timedelta
+    import app.config as cfg_mod
+    import app.db as db_mod
+    importlib.reload(cfg_mod)
+    importlib.reload(db_mod)
+    await db_mod.init_db()
+
+    from sqlalchemy import select
+
+    # Stale run: started >30min ago, still 'running'
+    stale_id = await db_mod.create_scan_run("eod", 655)
+    # Fresh run: started just now, still 'running' (must survive)
+    fresh_id = await db_mod.create_scan_run("manual", 5)
+    async with db_mod.async_session() as db:
+        res = await db.execute(select(db_mod.ScanRun).where(db_mod.ScanRun.id == stale_id))
+        run = res.scalar_one()
+        run.started_at = (db_mod._utcnow() - timedelta(hours=2)).isoformat()
+        await db.commit()
+
+    reaped = await db_mod.reap_stale_scan_runs(max_age_minutes=30)
+    assert reaped == 1
+
+    async with db_mod.async_session() as db:
+        res = await db.execute(select(db_mod.ScanRun).where(db_mod.ScanRun.id == stale_id))
+        stale = res.scalar_one()
+        assert stale.status == "failed"
+        assert stale.finished_at is not None
+        assert "reaped" in (stale.error or "")
+
+        res = await db.execute(select(db_mod.ScanRun).where(db_mod.ScanRun.id == fresh_id))
+        fresh = res.scalar_one()
+        assert fresh.status == "running"
+
+
+@pytest.mark.asyncio
 async def test_save_and_list_signals(tmp_path, monkeypatch):
     db_path = tmp_path / "t3.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")

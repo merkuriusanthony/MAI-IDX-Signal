@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 
@@ -244,6 +244,32 @@ async def init_db() -> None:
             await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             await conn.exec_driver_sql("PRAGMA busy_timeout=30000")
         await conn.run_sync(Base.metadata.create_all)
+
+
+async def reap_stale_scan_runs(max_age_minutes: int = 30) -> int:
+    """Mark orphaned scan runs (status='running' but never finished) as failed.
+
+    A run is stale if it's still 'running' yet its start is older than
+    max_age_minutes — typically left behind by a container restart that
+    killed the scan mid-flight. Returns the number of runs reaped.
+    """
+    cutoff = (_utcnow() - timedelta(minutes=max_age_minutes)).isoformat()
+    from sqlalchemy import select
+    async with async_session() as db:
+        res = await db.execute(
+            select(ScanRun).where(
+                ScanRun.status == "running",
+                ScanRun.started_at < cutoff,
+            )
+        )
+        stale = res.scalars().all()
+        for run in stale:
+            run.status = "failed"
+            run.finished_at = _utcnow().isoformat()
+            run.error = "reaped: orphaned run (likely container restart mid-scan)"
+        if stale:
+            await db.commit()
+        return len(stale)
 
 
 async def get_session() -> AsyncSession:
