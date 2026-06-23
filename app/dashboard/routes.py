@@ -71,12 +71,18 @@ async def index(db: AsyncSession = Depends(get_session)):
     rows = result.scalars().all()
 
     scan_form = (
-        "<form method='POST' action='/dashboard/scan' class='mb-4 inline-block'>"
+        "<form method='POST' action='/dashboard/scan' class='mb-4 inline-flex items-center gap-2' "
+        "onsubmit=\"this.querySelector('button').disabled=true;"
+        "this.querySelector('button').textContent='⏳ Memulai scan…';\">"
         "<input type='hidden' name='mode' value='manual'>"
-        "<input type='hidden' name='limit' value='20'>"
+        "<select name='limit' class='bg-gray-800 text-white text-sm rounded px-2 py-2'>"
+        "<option value='20'>Top 20 (cepat)</option>"
+        "<option value='100'>Top 100</option>"
+        "<option value='0'>Full universe (semua emiten)</option>"
+        "</select>"
         "<button type='submit' class='bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm'>"
-        "🔍 Scan Sekarang (Top 5)</button>"
-        "<span id='signal-count' class='text-xs text-gray-500 ml-4'></span>"
+        "🔍 Scan Sekarang</button>"
+        "<span id='signal-count' class='text-xs text-gray-500 ml-2'></span>"
         "</form>"
         "<script>"
         "async function refreshSignals(){try{"
@@ -123,14 +129,33 @@ async def index(db: AsyncSession = Depends(get_session)):
 
 @router.post("/scan", response_class=HTMLResponse)
 async def trigger_scan_dashboard(mode: str = Form("manual"), limit: int = Form(20)):
-    """Run a scan from the dashboard button, then redirect to the signal list."""
+    """Kick off a scan in the BACKGROUND, then redirect to the live scan list.
+
+    The scan runs async so the browser never blocks — full-universe scans
+    (959 emiten) can take minutes. /dashboard/scans auto-refreshes and shows
+    live progress (status running -> success, scanned counter).
+    """
+    import asyncio
+
     from app.db import init_db
     from app.scanner import ScannerService
 
     await init_db()
-    scanner = ScannerService(mode="manual", limit=limit, top_n=5, generate_charts=True)
-    await scanner.run()
-    return RedirectResponse(url="/dashboard", status_code=303)
+    # limit=0 (or falsy) => full universe; otherwise cap to top N.
+    eff_limit = limit if limit and limit > 0 else None
+
+    async def _run() -> None:
+        try:
+            scanner = ScannerService(
+                mode="manual", limit=eff_limit, top_n=5, generate_charts=True
+            )
+            await scanner.run()
+        except Exception:  # never let a bg task die silently un-logged
+            import logging
+            logging.getLogger("app.scanner").exception("dashboard bg scan failed")
+
+    asyncio.create_task(_run())
+    return RedirectResponse(url="/dashboard/scans", status_code=303)
 
 
 @router.get("/signals/{signal_id}", response_class=HTMLResponse)
@@ -380,7 +405,14 @@ async def scans_list(db: AsyncSession = Depends(get_session)):
         "<th class='p-2'>Passed</th><th class='p-2'>Failed</th><th class='p-2'>Waktu</th>"
         "</tr></thead><tbody>" + "".join(cells) + "</tbody></table></div>"
     )
-    return _page("Scan Runs", table)
+    # Auto-refresh while any run is still 'running' so progress shows live.
+    any_running = any(r.status == "running" for r in runs)
+    refresh = (
+        "<p class='text-yellow-400 text-xs mb-2'>⏳ Scan berjalan… halaman refresh otomatis.</p>"
+        "<script>setTimeout(()=>location.reload(),4000);</script>"
+        if any_running else ""
+    )
+    return _page("Scan Runs", refresh + table)
 
 
 @router.get("/status", response_class=HTMLResponse)
