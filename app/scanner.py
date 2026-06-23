@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional
 
 from app.analytics.archetype import (
@@ -22,6 +23,7 @@ from app.db import (
     save_ohlcv,
     save_scan_candidate,
     save_signal_dict,
+    update_scan_progress,
 )
 from app.signals.chart import generate_chart
 from app.signals.generator import _build_one
@@ -48,6 +50,9 @@ class ScannerService:
         self.with_ai = with_ai
         self.generate_charts = generate_charts
         self.concurrency = concurrency or settings.SCAN_CONCURRENCY
+        self.fetch_timeout = settings.SCAN_FETCH_TIMEOUT
+        self.throttle_ms = settings.SCAN_THROTTLE_MS
+        self.checkpoint_interval = max(1, settings.SCAN_CHECKPOINT_INTERVAL)
 
         universe = load_universe()
         dev_limit = settings.SCAN_DEV_LIMIT
@@ -123,13 +128,17 @@ class ScannerService:
         candidates: List[Dict] = []
         error_msg = None
 
+        # Bounded thread pool: the blocking yfinance fetch runs HERE, off the
+        # event loop, so the worker pool below genuinely runs concurrently
+        # (a plain Semaphore around a blocking call serializes everything).
+        executor = ThreadPoolExecutor(
+            max_workers=self.concurrency, thread_name_prefix="scan-fetch"
+        )
         try:
-            sem = asyncio.Semaphore(self.concurrency)
-
             # Phase 5.2: detect market regime once per scan (IHSG ^JKSE).
             # Fetch is blocking yfinance -> run in executor. Fails open.
             loop = asyncio.get_event_loop()
-            regime = await loop.run_in_executor(None, detect_regime)
+            regime = await loop.run_in_executor(executor, detect_regime)
             logger.info("[scanner] regime=%s ok=%s reason=%s",
                         regime.regime, regime.ok, regime.reason)
 
@@ -140,15 +149,34 @@ class ScannerService:
 
             async def _process(symbol: str) -> Optional[Dict]:
                 nonlocal scanned, passed, failed
-                async with sem:
-                    result = fetch_ohlcv_safe(symbol)
-                    scanned += 1
-                    if scanned % 100 == 0:
-                        logger.info("[scanner] progress %d/%d", scanned, universe_count)
-                    if not result["ok"]:
-                        failed += 1
-                        return None
+                # Offload the blocking yfinance fetch to the thread pool so
+                # this coroutine yields the event loop while waiting on I/O.
+                try:
+                    fut = loop.run_in_executor(executor, fetch_ohlcv_safe, symbol)
+                    result = await asyncio.wait_for(fut, timeout=self.fetch_timeout)
+                except asyncio.TimeoutError:
+                    logger.debug("[scanner] fetch timeout %s", symbol)
+                    result = {"ok": False}
+                except Exception as exc:
+                    logger.debug("[scanner] fetch error %s: %s", symbol, exc)
+                    result = {"ok": False}
 
+                scanned += 1
+                if scanned % 100 == 0:
+                    logger.info("[scanner] progress %d/%d", scanned, universe_count)
+                # Crash-recoverable checkpoint: persist live progress so a
+                # restart can see how far a long full-universe scan got.
+                if scanned % self.checkpoint_interval == 0:
+                    try:
+                        await update_scan_progress(scan_run_id, scanned)
+                    except Exception as exc:
+                        logger.debug("checkpoint error: %s", exc)
+
+                if not result.get("ok"):
+                    failed += 1
+                    return None
+
+                if True:
                     df = result["df"]
                     # cache to SQLite
                     try:
@@ -245,12 +273,38 @@ class ScannerService:
                     passed += 1
                     return candidate
 
-            tasks = [_process(sym) for sym in self.universe]
-            results = await asyncio.gather(*tasks, return_exceptions=False)
+            # Worker-pool over an asyncio.Queue: N workers each pull a symbol,
+            # await its (executor-offloaded) fetch, score inline, and push the
+            # candidate. Concurrency is bounded by the worker count == the
+            # thread-pool size, so at most `concurrency` fetches run at once.
+            queue: asyncio.Queue = asyncio.Queue()
+            for sym in self.universe:
+                queue.put_nowait(sym)
 
-            for r in results:
-                if r is not None:
-                    candidates.append(r)
+            throttle = self.throttle_ms / 1000.0 if self.throttle_ms > 0 else 0.0
+
+            async def _worker() -> None:
+                while True:
+                    try:
+                        symbol = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
+                    try:
+                        cand = await _process(symbol)
+                        if cand is not None:
+                            candidates.append(cand)
+                    except Exception as exc:
+                        logger.warning("worker error %s: %s", symbol, exc)
+                    finally:
+                        queue.task_done()
+                    if throttle:
+                        await asyncio.sleep(throttle)
+
+            workers = [
+                asyncio.create_task(_worker())
+                for _ in range(min(self.concurrency, max(1, universe_count)))
+            ]
+            await asyncio.gather(*workers)
 
             # save all candidates
             for cand in candidates:
@@ -332,3 +386,5 @@ class ScannerService:
                 "error": error_msg,
                 "top_signals": [],
             }
+        finally:
+            executor.shutdown(wait=False)

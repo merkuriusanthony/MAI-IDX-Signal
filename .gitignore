@@ -12,3 +12,4 @@ data/
 .hermes/
 .claude_goal.txt
 .claude_finish.txt
+.claude_*.txt

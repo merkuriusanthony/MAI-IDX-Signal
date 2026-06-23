@@ -368,6 +368,31 @@ async def send_signal_batch(signals: list, chat_id: str | None = None, mode: str
     return sent
 
 
+async def send_text_notify(text: str, chat_id: str | None = None) -> bool:
+    """Send a plain Markdown text message to the configured chat.
+
+    Returns True if sent, False if no token/chat or on send failure. Used for
+    ops notifications (e.g. daily universe IPO/delisting summary).
+    """
+    if not token_is_valid(settings.TELEGRAM_BOT_TOKEN):
+        logger.info("send_text_notify skipped: no telegram token")
+        return False
+    chat_id = chat_id or settings.effective_telegram_chat_id()
+    if not chat_id:
+        logger.warning("send_text_notify skipped: no chat id")
+        return False
+
+    from telegram import Bot
+
+    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+        return True
+    except Exception as exc:
+        logger.warning("send_text_notify error: %s", exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # WhatsApp send hook placeholder
 # ---------------------------------------------------------------------------

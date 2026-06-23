@@ -342,6 +342,22 @@ async def create_scan_run(mode: str, universe_count: int) -> int:
         return run.id
 
 
+async def update_scan_progress(scan_run_id: int, scanned_count: int) -> None:
+    """Persist live progress for a running scan (crash-recoverable checkpoint).
+
+    Only bumps the scanned_count so a dashboard / reaper can see how far a
+    long full-universe scan has gotten before a crash. Cheap, called every
+    SCAN_CHECKPOINT_INTERVAL symbols.
+    """
+    from sqlalchemy import select
+    async with async_session() as db:
+        result = await db.execute(select(ScanRun).where(ScanRun.id == scan_run_id))
+        run = result.scalar_one_or_none()
+        if run:
+            run.scanned_count = scanned_count
+            await db.commit()
+
+
 async def finish_scan_run(
     scan_run_id: int,
     status: str,
