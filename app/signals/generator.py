@@ -119,7 +119,8 @@ async def _build_one(
             from app.ai.claude_client import call_claude
             from app.ai.prompts import build_signal_prompt
             prompt = build_signal_prompt(symbol, score_dict, snap.to_dict())
-            ai = await call_claude(prompt)
+            from app.config import settings
+            ai = await call_claude(prompt, model=settings.CLAUDE_DECISION_MODEL)
             summary = ai.get("summary", "")
             if ai.get("key_reasons") and not ai.get("_fallback"):
                 score_dict["reasons"] = list(ai["key_reasons"]) + score_dict["reasons"]
