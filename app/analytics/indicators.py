@@ -154,6 +154,10 @@ class FeatureSnapshot:
     resistance: float = 0.0
     # Fibonacci
     fib: Dict[str, float] = field(default_factory=dict)
+    # Trend (from MA stack) — UPTREND / DOWNTREND / SIDEWAYS
+    trend_label: str = ""
+    # Foreign net flow over last 5 sessions (set by generator post-fetch)
+    foreign_net_5d: Optional[float] = None
     # Reason flags
     reason_flags: List[str] = field(default_factory=list)
     # Data quality
@@ -191,9 +195,28 @@ class FeatureSnapshot:
                 "resistance": self.resistance,
             },
             "fib": self.fib,
+            "trend_label": self.trend_label,
+            "foreign_net_5d": self.foreign_net_5d,
             "reason_flags": self.reason_flags,
             "bars_available": self.bars_available,
         }
+
+
+def _trend_label(snap: "FeatureSnapshot") -> str:
+    """Derive UPTREND / DOWNTREND / SIDEWAYS from the MA stack.
+
+    UPTREND:   close > ma20 > ma50  (and > ma200 when present).
+    DOWNTREND: close < ma20 < ma50.
+    else:      SIDEWAYS (also when MAs are None due to short history).
+    """
+    c, m20, m50, m200 = snap.close, snap.ma20, snap.ma50, snap.ma200
+    if m20 is None or m50 is None or not c:
+        return "SIDEWAYS"
+    if c > m20 > m50 and (m200 is None or c > m200):
+        return "UPTREND"
+    if c < m20 < m50:
+        return "DOWNTREND"
+    return "SIDEWAYS"
 
 
 def compute_features(df: pd.DataFrame, symbol: str = "") -> FeatureSnapshot:
@@ -254,6 +277,9 @@ def compute_features(df: pd.DataFrame, symbol: str = "") -> FeatureSnapshot:
     snap.support = sr["support"]
     snap.resistance = sr["resistance"]
     snap.fib = fib_retracement(df, 120)
+
+    # Trend label from MA stack (guard None MAs from short history)
+    snap.trend_label = _trend_label(snap)
 
     # populate reason flags
     flags = snap.reason_flags

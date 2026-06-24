@@ -16,7 +16,7 @@ from app.db import init_db
 from app.pages.admin import router as admin_router
 from app.pages.landing import router as landing_router
 from app.pages.member import router as member_router
-from app.signals.routes import chart_router, scan_router, signals_router
+from app.signals.routes import analyze_router, chart_router, scan_router, signals_router
 
 VERSION = "0.8.0"
 
@@ -101,6 +101,7 @@ app = FastAPI(title="MAI-IDX-Signal", version=VERSION, lifespan=lifespan)
 app.include_router(signals_router)
 app.include_router(scan_router)
 app.include_router(chart_router)
+app.include_router(analyze_router)
 app.include_router(dashboard_router)
 app.include_router(backtest_router)
 app.include_router(landing_router)

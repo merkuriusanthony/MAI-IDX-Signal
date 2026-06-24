@@ -62,6 +62,104 @@ ACTION_COLOR = {
 }
 
 
+def _fmt_foreign(v):
+    """Return (html_cell_inner, data_value_str) for the Foreign column.
+
+    Positive green ▲, negative red ▼, None/non-numeric grey n/a.
+    data value is raw numeric (None -> "0") for client-side numeric sort.
+    """
+    if v is None:
+        return ("<span class='text-gray-500'>n/a</span>", "0")
+    try:
+        n = float(v)
+    except Exception:
+        return ("<span class='text-gray-500'>n/a</span>", "0")
+    if n != n:  # NaN
+        return ("<span class='text-gray-500'>n/a</span>", "0")
+    a = abs(n)
+    if a >= 1_000_000_000:
+        amt = f"{a / 1_000_000_000:.1f}B"
+    elif a >= 1_000_000:
+        amt = f"{a / 1_000_000:.1f}M"
+    else:
+        amt = f"{a / 1_000_000:.2f}M"
+    if n > 0:
+        return (f"<span style='color:#3fb950'>▲ Rp{amt}</span>", str(n))
+    if n < 0:
+        return (f"<span style='color:#f85149'>▼ Rp{amt}</span>", str(n))
+    return ("<span class='text-gray-500'>Rp0</span>", "0")
+
+
+_FUND_ROWS = [
+    ("Valuation", [
+        ("PER", "per", "ratio", True), ("PBV", "pbv", "ratio", True),
+        ("EV/EBITDA", "ev_ebitda", "ratio", False),
+        ("DivY", "div_yield", "pct", False), ("EPS", "eps_ttm", "money", False),
+    ]),
+    ("Profitability", [
+        ("ROE", "roe", "pct", True), ("ROA", "roa", "pct", True),
+        ("NetMargin", "net_margin", "pct", True),
+    ]),
+    ("P&L TTM", [
+        ("Rev TTM", "rev_ttm", "money", False), ("Rev YoY", "rev_yoy", "pct", False),
+        ("NI TTM", "ni_ttm", "money", False), ("NI YoY", "ni_yoy", "pct", False),
+        ("EBITDA", "ebitda", "money", False),
+    ]),
+    ("Balance Sheet", [
+        ("Assets", "assets", "money", False), ("Equity", "equity", "money", False),
+        ("Cash", "cash", "money", False), ("DER", "der", "ratio", False),
+        ("CR", "cr", "ratio", False),
+    ]),
+    ("Cash Flow", [
+        ("OCF", "ocf", "money", False), ("Capex", "capex", "money", False),
+        ("FCF", "fcf", "money", False),
+    ]),
+]
+
+_VERDICT_HTML = {
+    "+": ("text-green-400", " [+]"),
+    "!": ("text-red-400", " [!]"),
+    "=": ("text-gray-400", " [=]"),
+    "": ("text-gray-200", ""),
+}
+
+
+def _fund_table_html(fin: dict) -> str:
+    """Render the fundamental table (Tailwind) sharing fundamentals.py verdicts."""
+    if not fin:
+        return (
+            "<div class='bg-gray-900 p-4 rounded-lg mb-4'>"
+            "<h3 class='text-sm font-bold text-blue-400 mb-2'>Fundamental</h3>"
+            "<p class='text-sm text-gray-500'>Fundamental belum tersedia.</p></div>"
+        )
+    from app.analytics.fundamentals import fmt as _fmt, verdict as _verdict
+
+    sections = []
+    for label, cols in _FUND_ROWS:
+        cells = []
+        for name, key, kind, bench in cols:
+            val = fin.get(key)
+            txt = _fmt(val, kind)
+            cls, tag = "text-gray-200", ""
+            if bench and val is not None:
+                v = _verdict(key, val)
+                cls, tag = _VERDICT_HTML.get(v, ("text-gray-200", ""))
+            cells.append(
+                f"<div class='px-2 py-1'><span class='text-xs text-gray-500'>{name}</span><br>"
+                f"<span class='{cls} text-sm font-semibold'>{txt}{tag}</span></div>"
+            )
+        sections.append(
+            f"<div class='mb-2'><p class='text-xs font-bold text-blue-300 mb-1'>{label}</p>"
+            f"<div class='grid grid-cols-5 gap-1'>{''.join(cells)}</div></div>"
+        )
+    return (
+        "<div class='bg-gray-900 p-4 rounded-lg mb-4'>"
+        "<h3 class='text-sm font-bold text-blue-400 mb-2'>Fundamental</h3>"
+        + "".join(sections)
+        + "</div>"
+    )
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(db: AsyncSession = Depends(get_session)):
     """List the latest signals."""
@@ -102,6 +200,14 @@ async def index(db: AsyncSession = Depends(get_session)):
         board = get_profile(s.symbol).get("board", "RG")
         board_color = BOARD_COLOR.get(board, "text-gray-400")
         sl_val = s.stop_loss or s.sl
+        # Foreign net 5d from snapshot (Option C: signal lama -> None -> n/a)
+        fnet = None
+        try:
+            snap = json.loads(s.snapshot_json) if s.snapshot_json else {}
+            fnet = snap.get("foreign_net_5d")
+        except Exception:
+            fnet = None
+        inner_foreign, fdata = _fmt_foreign(fnet)
         try:
             ts = int(s.created_at.timestamp())
         except Exception:
@@ -114,11 +220,12 @@ async def index(db: AsyncSession = Depends(get_session)):
             "<tr class='border-b border-gray-800 hover:bg-gray-900' "
             f"data-symbol='{s.symbol}' data-action='{action}' data-board='{board}' "
             f"data-score='{s.score}' data-entry='{s.entry}' data-tp1='{s.tp1}' "
-            f"data-tp2='{s.tp2}' data-sl='{sl_val}' data-ts='{ts}'>"
+            f"data-tp2='{s.tp2}' data-sl='{sl_val}' data-ts='{ts}' data-foreign='{fdata}'>"
             f"<td class='p-2 font-semibold'><a href='/dashboard/symbols/{s.symbol}' class='text-blue-400 hover:underline'>{s.symbol}</a></td>"
             f"<td class='p-2 {board_color} text-xs font-bold'>{board}</td>"
             f"<td class='p-2 {color} font-bold'>{action}</td>"
             f"<td class='p-2'>{s.score:.1f}</td>"
+            f"<td class='p-2'>{inner_foreign}</td>"
             f"<td class='p-2'>{s.entry:,.0f}</td>"
             f"<td class='p-2'>{s.tp1:,.0f}</td>"
             f"<td class='p-2'>{s.tp2:,.0f}</td>"
@@ -147,6 +254,11 @@ async def index(db: AsyncSession = Depends(get_session)):
         "<option value=''>Semua board</option>"
         "<option value='RG'>RG</option><option value='NG'>NG</option><option value='TN'>TN</option>"
         "</select>"
+        "<select id='sig-foreign' onchange='sigFilter()' class='bg-gray-800 text-white text-sm rounded px-2 py-2'>"
+        "<option value=''>Semua FA</option>"
+        "<option value='buy'>FA Beli (net&gt;0)</option>"
+        "<option value='sell'>FA Jual (net&lt;0)</option>"
+        "</select>"
         "<span id='sig-counter' class='text-xs text-gray-500 ml-1'></span>"
         "</div>"
     )
@@ -156,6 +268,7 @@ async def index(db: AsyncSession = Depends(get_session)):
         ("Board", "board", "str"),
         ("Action", "action", "str"),
         ("Score", "score", "num"),
+        ("Foreign", "foreign", "num"),
         ("Entry", "entry", "num"),
         ("TP1", "tp1", "num"),
         ("TP2", "tp2", "num"),
@@ -186,12 +299,15 @@ async def index(db: AsyncSession = Depends(get_session)):
         "var q=(document.getElementById('sig-search').value||'').trim().toUpperCase();"
         "var a=document.getElementById('sig-action').value;"
         "var b=document.getElementById('sig-board').value;"
+        "var f=document.getElementById('sig-foreign').value;"
         "document.getElementById('sig-clear').classList.toggle('hidden',!q);"
         "var shown=0;"
         "rows.forEach(function(r){"
+        "var fv=parseFloat(r.getAttribute('data-foreign'))||0;"
+        "var okF=(!f)||(f==='buy'&&fv>0)||(f==='sell'&&fv<0);"
         "var ok=(!q||r.getAttribute('data-symbol').toUpperCase().indexOf(q)>=0)"
         "&&(!a||r.getAttribute('data-action')===a)"
-        "&&(!b||r.getAttribute('data-board')===b);"
+        "&&(!b||r.getAttribute('data-board')===b)&&okF;"
         "r.style.display=ok?'':'none';if(ok)shown++;});"
         "document.getElementById('sig-counter').textContent='Menampilkan '+shown+' dari '+total+' sinyal';"
         "};"
@@ -268,9 +384,45 @@ async def signal_detail(signal_id: int, db: AsyncSession = Depends(get_session))
         fname = s.chart_path.split("/")[-1]
         chart_html = f"<img src='/charts/{fname}' class='mt-4 rounded max-w-full' />"
 
+    # Parse snapshot for fundamentals + technical levels
+    try:
+        snap = json.loads(s.snapshot_json) if s.snapshot_json else {}
+    except Exception:
+        snap = {}
+    fin = snap.get("fin") or {}
+    trend_label = snap.get("trend_label") or "—"
+    fnet = snap.get("foreign_net_5d")
+    sr = snap.get("support_resistance") or {}
+    fib = snap.get("fib") or {}
+
     reason_html = "".join(f"<li class='text-sm text-gray-300'>• {r}</li>" for r in reasons)
+
+    fnet_html = _fmt_foreign(fnet)[0]
+
+    levels_block = (
+        "<div class='bg-gray-900 p-4 rounded-lg mb-4'>"
+        "<h3 class='text-sm font-bold text-blue-400 mb-2'>Level Teknikal</h3>"
+        "<div class='grid grid-cols-3 gap-3 text-sm'>"
+        f"<div><span class='text-gray-500 text-xs'>Trend</span><br>{trend_label}</div>"
+        f"<div><span class='text-gray-500 text-xs'>Support</span><br>{(sr.get('support') or 0):,.0f}</div>"
+        f"<div><span class='text-gray-500 text-xs'>Resistance</span><br>{(sr.get('resistance') or 0):,.0f}</div>"
+        f"<div><span class='text-gray-500 text-xs'>Invalidation</span><br>{s.invalidation:,.0f}</div>"
+        f"<div><span class='text-gray-500 text-xs'>Foreign 5d</span><br>{fnet_html}</div>"
+        f"<div><span class='text-gray-500 text-xs'>Fib 0.5</span><br>{(fib.get('0.5') or 0):,.0f}</div>"
+        "</div></div>"
+    )
+
+    fund_block = _fund_table_html(fin)
+
+    actions = (
+        f"<form method='POST' action='/dashboard/signals/{signal_id}/regenerate' class='inline'>"
+        "<button type='submit' class='bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm mr-2'>"
+        "🔄 Regenerate Chart</button></form>"
+        "<a href='/dashboard' class='bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded text-sm'>← Kembali</a>"
+    )
+
     body = (
-        f"<div class='bg-gray-900 p-6 rounded-lg max-w-2xl'>"
+        f"<div class='bg-gray-900 p-6 rounded-lg max-w-4xl'>"
         f"<h2 class='text-xl font-bold {color}'>{s.symbol} — {action} "
         f"<span class='{board_color} text-sm'>[{board}]</span></h2>"
         f"<p class='text-gray-400 text-sm mb-4'>{str(s.created_at)[:19]}</p>"
@@ -282,12 +434,51 @@ async def signal_detail(signal_id: int, db: AsyncSession = Depends(get_session))
         f"<div><p class='text-gray-500 text-xs'>Stop Loss</p><p class='text-lg font-semibold text-red-400'>{s.stop_loss or s.sl:,.0f}</p></div>"
         f"<div><p class='text-gray-500 text-xs'>Status</p><p class='text-lg font-semibold'>{s.status}</p></div>"
         f"</div>"
-        f"<ul class='mb-4'>{reason_html}</ul>"
+        f"<div class='mb-4'>{actions}</div>"
+        + levels_block
+        + fund_block
+        + f"<ul class='mb-4'>{reason_html}</ul>"
         + (f"<p class='text-sm text-gray-400 italic'>{s.summary}</p>" if s.summary else "")
         + chart_html
         + "</div>"
     )
     return _page(f"{s.symbol} Signal #{signal_id}", body)
+
+
+@router.post("/signals/{signal_id}/regenerate", response_class=HTMLResponse)
+async def regenerate_chart(signal_id: int, db: AsyncSession = Depends(get_session)):
+    """Re-fetch OHLCV + Stockbit deep data and re-render the chart."""
+    result = await db.execute(select(Signal).where(Signal.id == signal_id))
+    s = result.scalar_one_or_none()
+    if not s:
+        return _page("Not Found", "<p class='text-red-400'>Sinyal tidak ditemukan.</p>")
+    try:
+        from app.data.fetch_yahoo import fetch_ohlcv_safe
+        from app.signals.chart import generate_chart
+        from app.signals.generator import generate_signal_single
+
+        sig = await generate_signal_single(s.symbol)
+        if sig is not None and sig.get("_df") is not None:
+            df = sig["_df"]
+            fdf = sig.get("_foreign_df")
+            fin = sig.get("fin")
+        else:
+            res = fetch_ohlcv_safe(s.symbol, min_rows=20)
+            df = res["df"] if res.get("ok") else None
+            fdf, fin = None, {}
+        if df is not None:
+            sig_obj = sig or {"symbol": s.symbol, "action": s.action,
+                              "score": s.score, "entry": s.entry, "tp1": s.tp1,
+                              "tp2": s.tp2, "stop_loss": s.stop_loss or s.sl,
+                              "close": s.entry, "confidence": s.confidence}
+            chart_path = generate_chart(s.symbol, df, sig_obj, fin=fin, foreign_df=fdf)
+            if chart_path:
+                s.chart_path = chart_path
+                await db.commit()
+    except Exception:
+        import logging
+        logging.getLogger("app.dashboard").exception("regenerate failed")
+    return RedirectResponse(url=f"/dashboard/signals/{signal_id}", status_code=303)
 
 
 @router.get("/performance", response_class=HTMLResponse)

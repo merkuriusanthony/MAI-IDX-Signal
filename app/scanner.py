@@ -344,8 +344,15 @@ class ScannerService:
                     if self.generate_charts:
                         df = cand.get("_df")
                         if df is not None:
-                            chart_path = generate_chart(cand["symbol"], df, sig)
+                            chart_path = generate_chart(
+                                cand["symbol"], df, sig,
+                                fin=sig.get("fin"),
+                                foreign_df=sig.get("_foreign_df"),
+                            )
                             sig["chart_path"] = chart_path
+                    # Drop transient (non-serializable) keys before persist.
+                    sig.pop("_df", None)
+                    sig.pop("_foreign_df", None)
                     sig_id = await save_signal_dict(sig, scan_run_id=scan_run_id)
                     sig["id"] = sig_id
                     signals.append(sig)

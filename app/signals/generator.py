@@ -103,6 +103,27 @@ async def _build_one(
     if not snap.data_ok:
         return None
 
+    # Best-effort Stockbit deep data (never fatal). Only top-N + on-demand
+    # reach _build_one (scanner scores candidates inline), so no fan-out cost.
+    fin: Dict = {}
+    foreign_df = None
+    try:
+        from app.data.fetch_stockbit import fetch_keystats, fetch_foreign_flow
+        fin = await fetch_keystats(symbol)
+        foreign_df = await fetch_foreign_flow(symbol)
+    except Exception as exc:
+        logger.warning("stockbit deep fetch failed for %s: %s", symbol, exc)
+        fin = fin or {}
+
+    # foreign_net_5d = sum of last-5 sessions' net (guard empty)
+    try:
+        if foreign_df is not None and not foreign_df.empty and "foreign_net" in foreign_df.columns:
+            import pandas as _pd
+            net5 = _pd.to_numeric(foreign_df["foreign_net"], errors="coerce").tail(5).sum()
+            snap.foreign_net_5d = float(net5)
+    except Exception:
+        snap.foreign_net_5d = None
+
     score_dict = score_snapshot(snap)
     levels = _levels(snap.close, snap.atr14 or snap.close * 0.02, snap.support)
 
@@ -126,6 +147,10 @@ async def _build_one(
                 score_dict["reasons"] = list(ai["key_reasons"]) + score_dict["reasons"]
         except Exception as exc:
             logger.warning("AI call failed for %s: %s", symbol, exc)
+
+    snap_dict = snap.to_dict()
+    snap_dict["fin"] = fin
+    snap_dict["foreign_net_5d"] = snap.foreign_net_5d
 
     return {
         "symbol": symbol,
@@ -154,8 +179,12 @@ async def _build_one(
         "ma200": snap.ma200,
         "volume_ratio": snap.volume_ratio,
         "atr_pct": snap.atr_pct,
-        "snapshot": snap.to_dict(),
+        "snapshot": snap_dict,
+        "fin": fin,
         "chart_path": "",
+        # Transient (NOT persisted): chart reuse without re-fetch.
+        "_df": df,
+        "_foreign_df": foreign_df,
     }
 
 

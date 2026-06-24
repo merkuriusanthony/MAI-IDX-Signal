@@ -14,6 +14,43 @@ from app.signals.generator import generate_signal_single, generate_signals
 signals_router = APIRouter(prefix="/api/signals", tags=["signals"])
 scan_router = APIRouter(prefix="/api/scan", tags=["scan"])
 chart_router = APIRouter(prefix="/charts", tags=["charts"])
+analyze_router = APIRouter(prefix="/api/analyze", tags=["analyze"])
+
+
+@analyze_router.post("/{symbol}")
+async def analyze_symbol(symbol: str):
+    """On-demand deep analysis for one symbol.
+
+    Builds a signal (fetches fundamentals + foreign flow internally),
+    renders the 5-panel chart, persists the signal, returns JSON.
+    """
+    from app.db import init_db, save_signal_dict
+    from app.signals.chart import generate_chart
+
+    await init_db()
+    sig = await generate_signal_single(symbol.upper())
+    if sig is None:
+        raise HTTPException(status_code=404, detail=f"No data for {symbol.upper()}")
+
+    df = sig.get("_df")
+    if df is not None:
+        chart_path = generate_chart(
+            symbol.upper(), df, sig,
+            fin=sig.get("fin"), foreign_df=sig.get("_foreign_df"),
+        )
+        sig["chart_path"] = chart_path
+
+    # Strip transient (non-serializable) keys before persist + response.
+    sig.pop("_df", None)
+    sig.pop("_foreign_df", None)
+    sig_id = await save_signal_dict(sig)
+
+    return {
+        "signal_id": sig_id,
+        "chart_path": sig.get("chart_path", ""),
+        "fin": sig.get("fin", {}),
+        "snapshot": sig.get("snapshot", {}),
+    }
 
 
 # ---------------------------------------------------------------------------
