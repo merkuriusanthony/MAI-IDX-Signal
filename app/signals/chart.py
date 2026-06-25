@@ -361,15 +361,16 @@ def _cell(fin, key, kind, bench=False):
 
 def _render_table(ax, fin):
     ax.axis("off")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
 
-    # ── define sections: (section_label, [(col_label, key, kind, bench), ...]) ──
     sections = [
         ("Valuation", [
-            ("PER",      "per",       "ratio", True),
-            ("PBV",      "pbv",       "ratio", True),
-            ("EV/EBITDA","ev_ebitda", "ratio", False),
-            ("DivY",     "div_yield", "pct",   False),
-            ("EPS",      "eps_ttm",   "money", False),
+            ("PER",       "per",        "ratio", True),
+            ("PBV",       "pbv",        "ratio", True),
+            ("EV/EBITDA", "ev_ebitda",  "ratio", False),
+            ("DivY",      "div_yield",  "pct",   False),
+            ("EPS",       "eps_ttm",    "money", False),
         ]),
         ("Profitability", [
             ("ROE",       "roe",        "pct", True),
@@ -401,86 +402,48 @@ def _render_table(ax, fin):
         ]),
     ]
 
-    NCOLS   = 6          # col-0 = section label, col 1-5 = data cells
-    NROWS   = len(sections)
-    _BG_TBL = "#0d1117"
-    _BG_HDR = "#161b22"  # section label bg
-    _BG_KEY = "#161b22"  # key cell bg
-    _BG_VAL = "#0d1117"  # value cell bg
+    _BG     = "#0d1117"
+    _BG_SEC = "#161b22"
     _BORDER = "#30363d"
+    _DIM    = "#8b949e"
+    _BLUE   = "#58a6ff"
 
-    col_widths = [0.13, 0.17, 0.17, 0.17, 0.17, 0.17]  # must sum ~1.0
-    row_height = 1.0 / NROWS
+    NROWS = len(sections)
+    NCOLS = 6  # col 0 = section, col 1-5 = data
+    col_w = [0.12] + [0.176] * 5   # normalized widths (sum=1.0)
+    row_h = 1.0 / NROWS
 
-    import matplotlib.patches as mpatches
-
-    def _draw_cell(ax, x, y, w, h, text, fgcolor, bgcolor, bold=False, fontsize=7.5, align="left"):
-        # background rect
-        rect = mpatches.FancyBboxPatch(
-            (x, y), w, h,
-            boxstyle="square,pad=0",
-            linewidth=0.5, edgecolor=_BORDER,
-            facecolor=bgcolor,
-            transform=ax.transAxes, clip_on=True
-        )
-        ax.add_patch(rect)
-        # text
-        pad = 0.008
-        ha = "left" if align == "left" else "center"
-        tx = x + pad if align == "left" else x + w / 2
-        ax.text(tx, y + h / 2, text,
-                color=fgcolor, fontsize=fontsize,
-                fontweight="bold" if bold else "normal",
-                va="center", ha=ha,
-                transform=ax.transAxes, clip_on=True)
+    import matplotlib.patches as mp
+    from matplotlib.patches import Rectangle
 
     for ri, (sec_label, cols) in enumerate(sections):
-        y_bot = 1.0 - (ri + 1) * row_height  # bottom-left of this row
+        y0 = 1.0 - (ri + 1) * row_h
 
-        # col-0: section label
-        _draw_cell(ax,
-                   x=0.0, y=y_bot,
-                   w=col_widths[0], h=row_height,
-                   text=sec_label,
-                   fgcolor="#58a6ff", bgcolor=_BG_HDR,
-                   bold=True, fontsize=7)
+        # --- section label cell ---
+        ax.add_patch(Rectangle((0, y0), col_w[0], row_h,
+                                linewidth=0.6, edgecolor=_BORDER,
+                                facecolor=_BG_SEC, transform=ax.transData))
+        ax.text(col_w[0] / 2, y0 + row_h / 2, sec_label,
+                color=_BLUE, fontsize=6.8, fontweight="bold",
+                ha="center", va="center")
 
-        # col 1-5: key + value stacked in one cell
-        cx = col_widths[0]
-        for ci, (col_label, key, kind, bench) in enumerate(cols):
-            cw = col_widths[ci + 1]
-            if key is None:
-                # empty cell — still draw border
-                rect = mpatches.FancyBboxPatch(
-                    (cx, y_bot), cw, row_height,
-                    boxstyle="square,pad=0",
-                    linewidth=0.5, edgecolor=_BORDER,
-                    facecolor=_BG_VAL,
-                    transform=ax.transAxes, clip_on=True
-                )
-                ax.add_patch(rect)
-            else:
+        # --- data cells ---
+        cx = col_w[0]
+        for ci, (label, key, kind, bench) in enumerate(cols):
+            cw = col_w[ci + 1]
+            ax.add_patch(Rectangle((cx, y0), cw, row_h,
+                                    linewidth=0.6, edgecolor=_BORDER,
+                                    facecolor=_BG, transform=ax.transData))
+            if key is not None:
                 val_txt, val_col = _cell(fin, key, kind, bench)
-                # draw background
-                rect = mpatches.FancyBboxPatch(
-                    (cx, y_bot), cw, row_height,
-                    boxstyle="square,pad=0",
-                    linewidth=0.5, edgecolor=_BORDER,
-                    facecolor=_BG_VAL,
-                    transform=ax.transAxes, clip_on=True
-                )
-                ax.add_patch(rect)
-                # key label (small, dim)
-                ax.text(cx + 0.006, y_bot + row_height * 0.72,
-                        col_label, color="#8b949e", fontsize=6.0,
-                        va="center", ha="left",
-                        transform=ax.transAxes, clip_on=True)
-                # value (larger, colored)
-                ax.text(cx + 0.006, y_bot + row_height * 0.28,
-                        val_txt, color=val_col, fontsize=7.5,
-                        fontweight="bold",
-                        va="center", ha="left",
-                        transform=ax.transAxes, clip_on=True)
+                # label dim small top
+                ax.text(cx + 0.006, y0 + row_h * 0.70,
+                        label, color=_DIM, fontsize=5.8,
+                        ha="left", va="center")
+                # value bold colored bottom
+                ax.text(cx + 0.006, y0 + row_h * 0.28,
+                        val_txt, color=val_col, fontsize=7.2,
+                        fontweight="bold", ha="left", va="center")
             cx += cw
 
 
