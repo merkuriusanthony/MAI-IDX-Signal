@@ -361,50 +361,127 @@ def _cell(fin, key, kind, bench=False):
 
 def _render_table(ax, fin):
     ax.axis("off")
-    rows = [
+
+    # ── define sections: (section_label, [(col_label, key, kind, bench), ...]) ──
+    sections = [
         ("Valuation", [
-            ("PER", "per", "ratio", True), ("PBV", "pbv", "ratio", True),
-            ("EV/EBITDA", "ev_ebitda", "ratio", False),
-            ("DivY", "div_yield", "pct", False), ("EPS", "eps_ttm", "money", False),
+            ("PER",      "per",       "ratio", True),
+            ("PBV",      "pbv",       "ratio", True),
+            ("EV/EBITDA","ev_ebitda", "ratio", False),
+            ("DivY",     "div_yield", "pct",   False),
+            ("EPS",      "eps_ttm",   "money", False),
         ]),
         ("Profitability", [
-            ("ROE", "roe", "pct", True), ("ROA", "roa", "pct", True),
+            ("ROE",       "roe",        "pct", True),
+            ("ROA",       "roa",        "pct", True),
             ("NetMargin", "net_margin", "pct", True),
-            ("—", None, None, False), ("—", None, None, False),
+            ("",          None,         None,  False),
+            ("",          None,         None,  False),
         ]),
         ("P&L TTM", [
-            ("Rev TTM", "rev_ttm", "money", False), ("Rev YoY", "rev_yoy", "pct", False),
-            ("NI TTM", "ni_ttm", "money", False), ("NI YoY", "ni_yoy", "pct", False),
-            ("EBITDA", "ebitda", "money", False),
+            ("Rev TTM", "rev_ttm", "money", False),
+            ("Rev YoY", "rev_yoy", "pct",   False),
+            ("NI TTM",  "ni_ttm",  "money", False),
+            ("NI YoY",  "ni_yoy",  "pct",   False),
+            ("EBITDA",  "ebitda",  "money", False),
         ]),
         ("Balance Sheet", [
-            ("Assets", "assets", "money", False), ("Equity", "equity", "money", False),
-            ("Cash", "cash", "money", False), ("DER", "der", "ratio", False),
-            ("CR", "cr", "ratio", False),
+            ("Assets", "assets", "money", False),
+            ("Equity", "equity", "money", False),
+            ("Cash",   "cash",   "money", False),
+            ("DER",    "der",    "ratio", False),
+            ("CR",     "cr",     "ratio", False),
         ]),
         ("Cash Flow", [
-            ("OCF", "ocf", "money", False), ("Capex", "capex", "money", False),
-            ("FCF", "fcf", "money", False),
-            ("—", None, None, False), ("—", None, None, False),
+            ("OCF",   "ocf",   "money", False),
+            ("Capex", "capex", "money", False),
+            ("FCF",   "fcf",   "money", False),
+            ("",      None,    None,    False),
+            ("",      None,    None,    False),
         ]),
     ]
-    ncols = 5
-    y = 0.95
-    dy = 0.95 / (len(rows) + 0.5)
-    for label, cols in rows:
-        ax.text(0.005, y, label, color="#58a6ff", fontsize=8, fontweight="bold",
-                va="top", transform=ax.transAxes)
-        for ci in range(ncols):
-            name, key, kind, bench = cols[ci]
-            x = 0.16 + ci * 0.168
+
+    NCOLS   = 6          # col-0 = section label, col 1-5 = data cells
+    NROWS   = len(sections)
+    _BG_TBL = "#0d1117"
+    _BG_HDR = "#161b22"  # section label bg
+    _BG_KEY = "#161b22"  # key cell bg
+    _BG_VAL = "#0d1117"  # value cell bg
+    _BORDER = "#30363d"
+
+    col_widths = [0.13, 0.17, 0.17, 0.17, 0.17, 0.17]  # must sum ~1.0
+    row_height = 1.0 / NROWS
+
+    import matplotlib.patches as mpatches
+
+    def _draw_cell(ax, x, y, w, h, text, fgcolor, bgcolor, bold=False, fontsize=7.5, align="left"):
+        # background rect
+        rect = mpatches.FancyBboxPatch(
+            (x, y), w, h,
+            boxstyle="square,pad=0",
+            linewidth=0.5, edgecolor=_BORDER,
+            facecolor=bgcolor,
+            transform=ax.transAxes, clip_on=True
+        )
+        ax.add_patch(rect)
+        # text
+        pad = 0.008
+        ha = "left" if align == "left" else "center"
+        tx = x + pad if align == "left" else x + w / 2
+        ax.text(tx, y + h / 2, text,
+                color=fgcolor, fontsize=fontsize,
+                fontweight="bold" if bold else "normal",
+                va="center", ha=ha,
+                transform=ax.transAxes, clip_on=True)
+
+    for ri, (sec_label, cols) in enumerate(sections):
+        y_bot = 1.0 - (ri + 1) * row_height  # bottom-left of this row
+
+        # col-0: section label
+        _draw_cell(ax,
+                   x=0.0, y=y_bot,
+                   w=col_widths[0], h=row_height,
+                   text=sec_label,
+                   fgcolor="#58a6ff", bgcolor=_BG_HDR,
+                   bold=True, fontsize=7)
+
+        # col 1-5: key + value stacked in one cell
+        cx = col_widths[0]
+        for ci, (col_label, key, kind, bench) in enumerate(cols):
+            cw = col_widths[ci + 1]
             if key is None:
-                continue
-            txt, col = _cell(fin, key, kind, bench)
-            ax.text(x, y, f"{name}: ", color="#8b949e", fontsize=7,
-                    va="top", transform=ax.transAxes)
-            ax.text(x + 0.075, y, txt, color=col, fontsize=7,
-                    va="top", transform=ax.transAxes)
-        y -= dy
+                # empty cell — still draw border
+                rect = mpatches.FancyBboxPatch(
+                    (cx, y_bot), cw, row_height,
+                    boxstyle="square,pad=0",
+                    linewidth=0.5, edgecolor=_BORDER,
+                    facecolor=_BG_VAL,
+                    transform=ax.transAxes, clip_on=True
+                )
+                ax.add_patch(rect)
+            else:
+                val_txt, val_col = _cell(fin, key, kind, bench)
+                # draw background
+                rect = mpatches.FancyBboxPatch(
+                    (cx, y_bot), cw, row_height,
+                    boxstyle="square,pad=0",
+                    linewidth=0.5, edgecolor=_BORDER,
+                    facecolor=_BG_VAL,
+                    transform=ax.transAxes, clip_on=True
+                )
+                ax.add_patch(rect)
+                # key label (small, dim)
+                ax.text(cx + 0.006, y_bot + row_height * 0.72,
+                        col_label, color="#8b949e", fontsize=6.0,
+                        va="center", ha="left",
+                        transform=ax.transAxes, clip_on=True)
+                # value (larger, colored)
+                ax.text(cx + 0.006, y_bot + row_height * 0.28,
+                        val_txt, color=val_col, fontsize=7.5,
+                        fontweight="bold",
+                        va="center", ha="left",
+                        transform=ax.transAxes, clip_on=True)
+            cx += cw
 
 
 def _header(symbol, signal, snap, fin):
