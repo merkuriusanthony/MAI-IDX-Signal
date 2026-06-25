@@ -192,6 +192,24 @@ def _panel_price(ax, idx, close, ma5, ma20, ma50, ma100, ma200, signal, snap):
     ax.plot(idx, ma100.values, label="MA100", color=_C_MA100, linewidth=0.8, alpha=0.7)
     ax.plot(idx, ma200.values, label="MA200", color=_C_MA200, linewidth=0.9, alpha=0.7)
 
+    # Support / Resistance zones (shaded band ±2%)
+    try:
+        sr = (snap or {}).get("support_resistance") or {}
+        res = _num(sr.get("resistance"))
+        sup = _num(sr.get("support"))
+        if res and res > 0:
+            ax.axhspan(res * 0.98, res * 1.02, color="#f85149", alpha=0.12, zorder=1)
+            ax.axhline(res, color="#f85149", linestyle="--", linewidth=0.9, alpha=0.6)
+            ax.text(idx[-1], res * 1.022, f"R {res:.0f}", color="#f85149",
+                    fontsize=7, va="bottom", ha="right")
+        if sup and sup > 0:
+            ax.axhspan(sup * 0.98, sup * 1.02, color="#3fb950", alpha=0.12, zorder=1)
+            ax.axhline(sup, color="#3fb950", linestyle="--", linewidth=0.9, alpha=0.6)
+            ax.text(idx[-1], sup * 0.978, f"S {sup:.0f}", color="#3fb950",
+                    fontsize=7, va="top", ha="right")
+    except Exception:
+        pass
+
     # Fib dotted levels
     fib = (snap or {}).get("fib") or {}
     for lvl, price in fib.items():
