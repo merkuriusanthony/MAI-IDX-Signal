@@ -14,18 +14,28 @@ logger = logging.getLogger(__name__)
 PROGRESS_SCAN = "📡 Sedang analisa IDX... tunggu 1-2 menit."
 PROGRESS_SYM = "📊 Sedang analisa {symbol}... sebentar."
 
-ZETA_PYTHON = "/zeta/MAI-IDX-Signal/.venv/bin/python"
+ZETA_PYTHON = "/usr/local/bin/python3"
 ZETA_DIR    = "/zeta"
+# venv site-packages injected via env PYTHONPATH in _zeta_run
 
 
 async def _zeta_run(script: str, *args, timeout: int = 120) -> tuple[str, str]:
     """Run a zeta script in a subprocess; return (stdout, stderr)."""
-    cmd = [ZETA_PYTHON, os.path.join(ZETA_DIR, script)] + list(args)
+    import os as _os
+    cmd = [ZETA_PYTHON, _os.path.join(ZETA_DIR, script)] + list(args)
+    env = _os.environ.copy()
+    env["PYTHONPATH"] = ZETA_DIR
+    env["ZETA_ROOT"] = ZETA_DIR
+    env["STOCKBIT_STATE"] = f"{ZETA_DIR}/.stockbit_state.json"
+    env["MPLCONFIGDIR"] = "/tmp/mplconfig"
+    env["ZETA_CACHE_DIR"] = "/tmp/zeta_cache"
+    env["ZETA_CHART_DIR"] = "/tmp/zeta_charts"
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=ZETA_DIR,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
