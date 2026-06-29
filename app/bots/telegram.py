@@ -1,8 +1,11 @@
 """Telegram bot: command handlers for MAI-IDX-Signal."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import subprocess
+import sys
 
 from app.config import settings
 
@@ -10,6 +13,88 @@ logger = logging.getLogger(__name__)
 
 PROGRESS_SCAN = "📡 Sedang analisa IDX... tunggu 1-2 menit."
 PROGRESS_SYM = "📊 Sedang analisa {symbol}... sebentar."
+
+ZETA_PYTHON = "/zeta/MAI-IDX-Signal/.venv/bin/python"
+ZETA_DIR    = "/zeta"
+
+
+async def _zeta_run(script: str, *args, timeout: int = 120) -> tuple[str, str]:
+    """Run a zeta script in a subprocess; return (stdout, stderr)."""
+    cmd = [ZETA_PYTHON, os.path.join(ZETA_DIR, script)] + list(args)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=ZETA_DIR,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return "", f"timeout after {timeout}s"
+    return out.decode(errors="replace"), err.decode(errors="replace")
+
+
+async def analisa_command(update, context):
+    """/analisa TICKER [TICKER2,...] — analisa pakai Zeta engine."""
+    args = getattr(context, "args", []) or []
+    if not args:
+        await update.message.reply_text(
+            "Gunakan:\n"
+            "• /analisa BBCA\n"
+            "• /analisa BBCA,BBRI,BMRI  (watchlist)\n"
+        )
+        return
+
+    raw = args[0].upper()
+    symbols = [s.strip() for s in raw.split(",") if s.strip()]
+
+    if len(symbols) == 1:
+        sym = symbols[0]
+        msg = await update.message.reply_text(f"📊 Analisa {sym} via Zeta... sebentar.")
+        # run signal + chart in parallel
+        sig_task   = asyncio.create_task(_zeta_run("zeta_signal.py", sym))
+        chart_task = asyncio.create_task(_zeta_run("zeta_chart.py",  sym))
+        sig_out, sig_err   = await sig_task
+        chart_out, chart_err = await chart_task
+
+        # parse chart path from stdout
+        chart_path = ""
+        for line in chart_out.strip().splitlines():
+            if line.strip().endswith(".png"):
+                chart_path = line.strip()
+
+        # parse signal text — strip debug lines (lines starting with [)
+        text_lines = [l for l in sig_out.splitlines() if not l.startswith("[")]
+        text = "\n".join(text_lines).strip() or f"⚠️ Tidak ada output untuk {sym}."
+
+        await msg.delete()
+        if chart_path and os.path.exists(chart_path):
+            with open(chart_path, "rb") as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=text[:1024],
+                    parse_mode="Markdown",
+                )
+            # send full text separately if too long
+            if len(text) > 1024:
+                await update.message.reply_text(text[1024:], parse_mode="Markdown")
+        else:
+            await update.message.reply_text(text, parse_mode="Markdown")
+
+    else:
+        # watchlist mode
+        syms_str = ",".join(symbols)
+        msg = await update.message.reply_text(f"📊 Analisa watchlist {syms_str}... sebentar.")
+        out, err = await _zeta_run("zeta_signal.py", "--watchlist", syms_str, timeout=180)
+        text_lines = [l for l in out.splitlines() if not l.startswith("[")]
+        text = "\n".join(text_lines).strip() or "⚠️ Tidak ada output."
+        await msg.delete()
+        # send in chunks (Telegram 4096 char limit)
+        for i in range(0, max(len(text), 1), 4000):
+            await update.message.reply_text(text[i:i+4000], parse_mode="Markdown")
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +338,7 @@ def build_application():
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("health", health_command))
     app.add_handler(CommandHandler("signal", signal_command))
+    app.add_handler(CommandHandler("analisa", analisa_command))
     app.add_handler(CommandHandler("scan", scan_command))
     app.add_handler(CommandHandler("why", why_command))
     app.add_handler(CommandHandler("track", track_command))
