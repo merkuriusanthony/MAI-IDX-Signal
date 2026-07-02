@@ -335,10 +335,38 @@ async def track_command(update, context):
 
 # ---------------------------------------------------------------------------
 # Build application
+async def compare_command(update, context):
+    """/compare BBCA,BBRI,BMRI — komparasi side-by-side via Zeta engine."""
+    args = getattr(context, "args", []) or []
+    if not args:
+        await update.message.reply_text(
+            "Gunakan:\n• /compare BBCA,BBRI\n• /compare BBCA,BBRI,BMRI,TLKM"
+        )
+        return
+
+    raw = args[0].upper()
+    symbols = [s.strip() for s in raw.split(",") if s.strip()]
+    if len(symbols) < 2:
+        await update.message.reply_text("Minimal 2 saham. Contoh: /compare BBCA,BBRI")
+        return
+
+    label = " vs ".join(symbols)
+    msg = await update.message.reply_text(f"📊 Compare {label}... sebentar.")
+    out, err = await _zeta_run("zeta_compare.py", ",".join(symbols), timeout=180)
+
+    if not out.strip():
+        await msg.edit_text(f"❌ Gagal compare {label}:\n{err[:300] or 'no output'}")
+        return
+
+    try:
+        await msg.edit_text(out.strip(), parse_mode="Markdown")
+    except Exception:
+        await msg.edit_text(out.strip())
+
+
 # ---------------------------------------------------------------------------
 
 def build_application():
-    """Build and return a python-telegram-bot Application with handlers."""
     from telegram.ext import ApplicationBuilder, CommandHandler
 
     token = settings.TELEGRAM_BOT_TOKEN
@@ -349,6 +377,7 @@ def build_application():
     app.add_handler(CommandHandler("health", health_command))
     app.add_handler(CommandHandler("signal", signal_command))
     app.add_handler(CommandHandler("analisa", analisa_command))
+    app.add_handler(CommandHandler("compare", compare_command))
     app.add_handler(CommandHandler("scan", scan_command))
     app.add_handler(CommandHandler("why", why_command))
     app.add_handler(CommandHandler("track", track_command))
