@@ -19,7 +19,7 @@ def _creds():
     return m_url.group(1).rstrip("/"), m_key.group(1)
 
 
-def chat(messages, model="cc/claude-sonnet-4-6", max_tokens=1024, timeout=90):
+def chat(messages, model="Test-Combo", max_tokens=1024, timeout=90):
     """Call 9router chat completion. Handles SSE stream, returns full text.
     Note: temperature omitted — deprecated on claude-opus-4-x models."""
     import time
@@ -37,6 +37,15 @@ def chat(messages, model="cc/claude-sonnet-4-6", max_tokens=1024, timeout=90):
                 time.sleep(10 * (attempt + 1))  # 10s, 20s, 30s
                 continue
             raise
+    # OpenAI non-stream JSON response (used by Test-Combo).
+    try:
+        obj = json.loads(raw)
+        content = obj.get("choices", [{}])[0].get("message", {}).get("content")
+        if content:
+            return content
+    except (json.JSONDecodeError, IndexError, AttributeError):
+        pass
+
     # SSE: collect delta.content from each `data: {...}` line
     parts = []
     for line in raw.splitlines():

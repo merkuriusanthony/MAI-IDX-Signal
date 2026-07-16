@@ -18,7 +18,7 @@ try:
 except Exception:
     zind = None
 
-MODEL = "cc/claude-opus-4-8"
+MODEL = "Test-Combo"
 
 SYS = (
     "Kamu analis teknikal, bandarmologi, dan fundamental saham IDX. "

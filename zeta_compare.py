@@ -203,7 +203,7 @@ def compare(symbols):
             {"role": "system", "content": "Kamu analis saham IDX. Jawab singkat dalam bahasa Indonesia."},
             {"role": "user", "content":
                 f"Berikan ranking 1 kalimat untuk saham-saham ini dan 1 kalimat alasan pilihan terbaik:\n{prompt_data}"}
-        ], model="cc/claude-sonnet-4-6", max_tokens=150)
+        ], model="Test-Combo", max_tokens=150)
         lines.append(f"\n🏆 *RANKING:* {resp.strip()}")
     except Exception as e:
         lines.append(f"\n🏆 *RANKING:* (llm skip: {e})")
