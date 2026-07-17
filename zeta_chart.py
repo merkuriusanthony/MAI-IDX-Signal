@@ -198,16 +198,37 @@ def make_chart(symbol, data, features=None, signal=None, outdir=OUTDIR, fin=None
                      color=col, fontsize=6.5, va="center", ha="right",
                      alpha=alpha, zorder=9)
 
-    # ── MA crossover / break markers removed for cleaner readable chart ─────
+    # ── break-up / break-down X markers ──────────────────────────────────────
+    break_up_idxs   = []  # close crossed above resistance → green X
+    break_down_idxs = []  # close dropped below support    → red X
+    for i in range(1, len(closes)):
+        prev, curr = closes[i-1], closes[i]
+        if sig_res and prev <= sig_res and curr > sig_res:
+            break_up_idxs.append(i)
+        if sig_sup and prev >= sig_sup and curr < sig_sup:
+            break_down_idxs.append(i)
 
-    # ── realtime current price line + right-side label ───────────────────────
+    if break_up_idxs:
+        bux = break_up_idxs
+        buy = [closes[i] for i in bux]
+        ax1.scatter(bux, buy, marker="x", color="#00ff88", s=220, zorder=8,
+                    linewidths=3.5, label="Break up")
+        for xi, yi in zip(bux[-3:], buy[-3:]):
+            ax1.annotate("X", (xi, yi), textcoords="offset points", xytext=(0, 10),
+                         ha="center", color="#00ff88", fontsize=11, fontweight="bold")
+
+    if break_down_idxs:
+        bdx = break_down_idxs
+        bdy = [closes[i] for i in bdx]
+        ax1.scatter(bdx, bdy, marker="x", color="#ff3333", s=220, zorder=8,
+                    linewidths=3.5, label="Break dn")
+        for xi, yi in zip(bdx[-3:], bdy[-3:]):
+            ax1.annotate("X", (xi, yi), textcoords="offset points", xytext=(0, -18),
+                         ha="center", color="#ff3333", fontsize=11, fontweight="bold")
+
+    # ── realtime current price: no yellow line/label drawn (removed per user) ─
     rt_price = (features or {}).get("realtime_price") or closes[-1]
     price_src = (features or {}).get("realtime_ts") or (features or {}).get("price_source", "")
-    if rt_price:
-        ax1.axhline(rt_price, color="#fde047", alpha=0.9, linestyle="-", linewidth=1.3, zorder=10)
-        ax1.text(len(x) - 1, rt_price, f" {rt_price:,.0f} ",
-                 color="#020617", fontsize=9, fontweight="bold", va="center", ha="left",
-                 bbox=dict(boxstyle="round,pad=0.25", fc="#fde047", ec="none"), zorder=11)
 
     sig_val  = (signal or {}).get("signal", "")
     conf_val = (signal or {}).get("confidence", "")
