@@ -211,20 +211,14 @@ def make_chart(symbol, data, features=None, signal=None, outdir=OUTDIR, fin=None
     if break_up_idxs:
         bux = break_up_idxs
         buy = [closes[i] for i in bux]
-        ax1.scatter(bux, buy, marker="x", color="#00ff88", s=220, zorder=8,
-                    linewidths=3.5, label="Break up")
-        for xi, yi in zip(bux[-3:], buy[-3:]):
-            ax1.annotate("X", (xi, yi), textcoords="offset points", xytext=(0, 10),
-                         ha="center", color="#00ff88", fontsize=11, fontweight="bold")
+        ax1.scatter(bux, buy, marker="x", color="#00ff88", s=60, zorder=8,
+                    linewidths=1.6, alpha=0.9, label="Break up")
 
     if break_down_idxs:
         bdx = break_down_idxs
         bdy = [closes[i] for i in bdx]
-        ax1.scatter(bdx, bdy, marker="x", color="#ff3333", s=220, zorder=8,
-                    linewidths=3.5, label="Break dn")
-        for xi, yi in zip(bdx[-3:], bdy[-3:]):
-            ax1.annotate("X", (xi, yi), textcoords="offset points", xytext=(0, -18),
-                         ha="center", color="#ff3333", fontsize=11, fontweight="bold")
+        ax1.scatter(bdx, bdy, marker="x", color="#ff3333", s=60, zorder=8,
+                    linewidths=1.6, alpha=0.9, label="Break dn")
 
     # ── realtime current price: no yellow line/label drawn (removed per user) ─
     rt_price = (features or {}).get("realtime_price") or closes[-1]
