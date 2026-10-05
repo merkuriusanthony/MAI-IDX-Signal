@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 sqlalchemy[asyncio]
+greenlet
 aiosqlite
 pandas
 numpy
