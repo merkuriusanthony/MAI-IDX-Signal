@@ -20,7 +20,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install fastapi uvicorn pydantic-settings pytest pytest-asyncio \
-            pandas numpy sqlalchemy aiosqlite httpx yfinance matplotlib \
+            pandas numpy sqlalchemy[asyncio] greenlet aiosqlite httpx yfinance matplotlib \
             apscheduler python-telegram-bot python-dotenv pyarrow python-multipart
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
