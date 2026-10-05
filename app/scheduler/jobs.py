@@ -18,7 +18,10 @@ async def _scan_and_notify(tag: str, top_n: int = 5, limit: int | None = None) -
     # limit=None => scan the FULL current universe (whatever the file holds,
     # 655 -> 800+). SCAN_DEV_LIMIT still caps it in dev. The worker pool makes
     # the full scan genuinely parallel.
-    scanner = ScannerService(mode=tag, top_n=top_n, limit=limit, generate_charts=True)
+    # with_ai=True: Phase 5.4 AI veto only runs on the top_n candidates (not
+    # the full universe), so cost/latency is bounded — lets Claude downgrade
+    # a BUY on bad news/filings instead of running scheduled scans blind.
+    scanner = ScannerService(mode=tag, top_n=top_n, limit=limit, generate_charts=True, with_ai=True)
     result = await scanner.run()
     signals = result.get("top_signals", [])
     logger.info("[%s] generated %d signals (scanned=%d)", tag, len(signals), result.get("scanned", 0))
