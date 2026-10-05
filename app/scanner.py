@@ -331,6 +331,20 @@ class ScannerService:
                     if sig is None:
                         continue
 
+                    # _build_one() re-derives score/action from scratch via
+                    # score_snapshot(), which does NOT see the regime/
+                    # archetype/MTF adjustments computed above in _process().
+                    # Without this, those gates only affected candidate
+                    # ranking, not the action/score actually shown to users.
+                    sig["score"] = cand["score"]
+                    sig["action"] = cand["action"]
+                    sig["label"] = cand["action"]
+                    sig["reason_codes"] = cand.get("reason_codes", sig.get("reason_codes", []))
+                    sig["regime"] = cand.get("regime")
+                    sig["archetype"] = cand.get("archetype")
+                    sig["regime_gated"] = cand.get("regime_gated", False)
+                    sig["mtf_gated"] = cand.get("mtf_gated", False)
+
                     # Phase 5.4: AI analyst layer. For BUY/WATCH, fetch recent
                     # news, have Claude (haiku) judge materiality/sentiment +
                     # emit a verdict, and let a 'reject'/negative-material read

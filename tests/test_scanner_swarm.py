@@ -178,3 +178,46 @@ async def test_fetch_failures_counted_not_fatal(scanner_env, monkeypatch):
     assert result["scanned"] == len(symbols)
     assert result["failed"] == len(symbols)
     assert result["passed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_regime_gate_reaches_final_signal(scanner_env, monkeypatch):
+    """Regression: _build_one() used to re-derive score/action from
+    scratch, silently discarding the regime/archetype/MTF gate computed
+    in _process() -- the gate only affected candidate *ranking*, never
+    what the API/user actually saw. Force a risk-off gate downgrade and
+    assert it survives into top_signals."""
+    symbols, _ = scanner_env
+    import app.db as dbm
+    await dbm.init_db()
+
+    import app.scanner as scanner_mod
+    importlib.reload(scanner_mod)
+
+    def fake_fetch(symbol, *a, **k):
+        df = _fake_df()  # strong uptrend -> base scorer wants BUY
+        df.attrs["symbol"] = symbol
+        return {
+            "symbol": symbol, "df": df, "ok": True, "error": None,
+            "close": 1500.0, "avg_volume_20": 5_000_000.0,
+            "value_estimate": 1500.0 * 5_000_000,
+        }
+
+    monkeypatch.setattr(scanner_mod, "fetch_ohlcv_safe", fake_fetch)
+    monkeypatch.setattr(scanner_mod, "detect_regime", lambda *a, **k: _fake_regime())
+    # Force every candidate to be gated BUY -> WATCH regardless of score.
+    monkeypatch.setattr(
+        scanner_mod, "apply_regime_gate",
+        lambda action, regime: ("WATCH", True, "forced test gate"),
+    )
+
+    sc = scanner_mod.ScannerService(mode="manual", generate_charts=False, top_n=3)
+    result = await sc.run()
+
+    assert result["top_signals"], "expected at least one signal"
+    for sig in result["top_signals"]:
+        assert sig["action"] == "WATCH", (
+            f"{sig['symbol']}: gate was computed but discarded by "
+            f"_build_one's re-scoring (got {sig['action']!r})"
+        )
+        assert sig["regime_gated"] is True
