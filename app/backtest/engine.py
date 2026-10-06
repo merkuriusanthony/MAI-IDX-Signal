@@ -83,17 +83,30 @@ def run_backtest(
     sector = get_sector(symbol)
     results: List[Dict] = []
 
-    for i in range(lookback, len(df) - hold_max - 1):
+    # Walk forward one bar at a time, but once a trade opens, jump straight
+    # to its exit bar before looking for the next entry. Without this, the
+    # loop re-evaluates every single day and opens a new "trade" on top of
+    # one still open (same capital, same symbol, overlapping holding
+    # windows) -- fine for win-rate/avg-return (each trade is independent),
+    # but it makes the sequential-compounding equity curve in
+    # _max_equity_drawdown() meaningless (one account can't hold N
+    # overlapping positions in the same stock).
+    i = lookback
+    limit = len(df) - hold_max - 1
+    while i < limit:
         hist = df.iloc[:i]
         snap = compute_features(hist, symbol=symbol)
         if not snap.data_ok:
+            i += 1
             continue
         score_dict = score_snapshot(snap)
         if score_dict["action"] != "BUY":
+            i += 1
             continue
 
         entry = float(hist["close"].iloc[-1])
         if entry <= 0:
+            i += 1
             continue
         tp1 = entry * (1 + tp1_pct)
         tp2 = entry * (1 + tp2_pct)
@@ -103,7 +116,8 @@ def run_backtest(
         outcome = "expired"
         exit_price = float(future["close"].iloc[-1])
         exit_date = str(future.index[-1])[:10]
-        for ts, row in future.iterrows():
+        exit_offset = len(future) - 1  # bars until exit, from entry bar
+        for offset, (ts, row) in enumerate(future.iterrows()):
             low = float(row["low"])
             high = float(row["high"])
             bar_open = float(row["open"])
@@ -111,6 +125,7 @@ def run_backtest(
             if low <= sl:
                 fill = min(sl, bar_open) if bar_open < sl else sl
                 outcome, exit_price, exit_date = "sl", fill, str(ts)[:10]
+                exit_offset = offset
                 break
             # TP1 before TP2 (conservative: book the nearer target within a bar).
             if high >= tp1:
@@ -118,6 +133,7 @@ def run_backtest(
                     outcome, exit_price, exit_date = "tp2", tp2, str(ts)[:10]
                 else:
                     outcome, exit_price, exit_date = "tp1", tp1, str(ts)[:10]
+                exit_offset = offset
                 break
 
         gross_pnl = (exit_price - entry) / entry * 100
@@ -136,6 +152,10 @@ def run_backtest(
             "score": score_dict["score"],
             "sector": sector,
         })
+        # No re-entry while "in position": resume scanning for the next
+        # trade only after this one has exited (see loop-restructure note
+        # above _apply_costs/_max_equity_drawdown).
+        i += exit_offset + 1
 
     return results
 

@@ -60,6 +60,16 @@ async def _execute_backtest(run_id: int, symbols: List[str], days: int) -> dict:
                 all_results.extend(trades)
             except Exception as exc:
                 logger.warning("backtest error for %s: %s", sym, exc)
+        # Sort chronologically before summarize(): _max_equity_drawdown()
+        # walks the list as one sequential equity curve, so without this
+        # it reads as grouped-by-symbol order (all of AADI's trades, then
+        # all of AALI's, ...) instead of time order -- the "drawdown"
+        # number becomes meaningless noise, not a real portfolio stat.
+        # (Trades from different symbols can still genuinely overlap in
+        # time; a true multi-position portfolio-equity model is a bigger
+        # follow-up. Chronological ordering is the cheap, honest fix for
+        # the single-equity-curve approximation already in place.)
+        all_results.sort(key=lambda t: t.get("entry_date", ""))
         summary = summarize(all_results)
         await finish_backtest_run(run_id, summary)
         return {"run_id": run_id, **summary}
@@ -195,6 +205,7 @@ async def backtest_page():
     if not results:
         return _page("Backtest", run_form + "<p class='text-gray-400'>Belum ada hasil backtest.</p>")
 
+    results = sorted(results, key=lambda r: r.get("entry_date", ""))
     summary = summarize(results)
     cards = (
         "<div class='grid grid-cols-2 md:grid-cols-3 gap-4 mb-6'>"
