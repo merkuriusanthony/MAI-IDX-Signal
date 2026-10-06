@@ -11,6 +11,7 @@ from app.analytics.archetype import (
     archetype_for_regime,
     mtf_weekly_filter,
 )
+from app.analytics.foreign_flow import foreign_flow_adjust
 from app.analytics.indicators import compute_features
 from app.analytics.regime import apply_regime_gate, detect_regime
 from app.analytics.scoring import gorengan_penalty, score_snapshot
@@ -344,6 +345,21 @@ class ScannerService:
                     sig["archetype"] = cand.get("archetype")
                     sig["regime_gated"] = cand.get("regime_gated", False)
                     sig["mtf_gated"] = cand.get("mtf_gated", False)
+
+                    # Phase 5.5: foreign broker-flow confirmation. Only
+                    # top-N candidates reach here with a fetched
+                    # foreign_df (sig["_foreign_df"], set in _build_one),
+                    # so this never adds a per-symbol Stockbit call to the
+                    # full-universe scoring loop above (_process). Applied
+                    # after the regime/archetype overwrite above so it
+                    # tempers the already-gated action, not a stale one.
+                    flow_score, flow_reasons, flow_codes = foreign_flow_adjust(
+                        sig.get("_foreign_df"), sig["action"], sig["score"]
+                    )
+                    if flow_reasons:
+                        sig["score"] = flow_score
+                        sig["reasons"] = flow_reasons + list(sig.get("reasons", []))
+                        sig["reason_codes"] = list(sig.get("reason_codes", [])) + flow_codes
 
                     # Phase 5.4: AI analyst layer. For BUY/WATCH, fetch recent
                     # news, have Claude (haiku) judge materiality/sentiment +
